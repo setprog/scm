@@ -12,7 +12,16 @@ import {
   type SubmitApprovalDocumentInput,
   type WorkflowRule,
 } from "@/lib/approval-workflow";
-import { type Dispatch, type SetStateAction, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type Dispatch,
+  type ReactNode,
+  type SetStateAction,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import * as XLSX from "xlsx";
 import {
   Activity,
@@ -26,6 +35,7 @@ import {
   FileText,
   HandCoins,
   LayoutGrid,
+  Menu,
   MoreVertical,
   Eye,
   Download,
@@ -9761,8 +9771,52 @@ function BudgetModule() {
   );
 }
 
+function ModuleSidebar({
+  activeModule,
+  onSelectModule,
+  headerExtra,
+}: {
+  activeModule: MainModule;
+  onSelectModule: (m: MainModule) => void;
+  headerExtra?: ReactNode;
+}) {
+  return (
+    <>
+      <div
+        className={cn(
+          "border-b px-5 py-4",
+          headerExtra && "flex items-start justify-between gap-2",
+        )}
+      >
+        <div>
+          <p className="text-base font-semibold">SupplyOS</p>
+          <p className="text-xs text-muted-foreground">SCM System</p>
+        </div>
+        {headerExtra}
+      </div>
+      <nav className="flex-1 space-y-1 overflow-y-auto p-3">
+        {modules.map((module) => {
+          const Icon = module.icon;
+          return (
+            <Button
+              key={module.label}
+              variant={activeModule === module.label ? "default" : "ghost"}
+              className="h-9 w-full justify-start gap-2"
+              onClick={() => onSelectModule(module.label)}
+            >
+              <Icon className="h-4 w-4" />
+              {module.label}
+            </Button>
+          );
+        })}
+      </nav>
+    </>
+  );
+}
+
 export default function Home() {
   const [activeModule, setActiveModule] = useState<MainModule>("Dashboard");
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [activeDrawer, setActiveDrawer] = useState<DrawerKey | null>(null);
   const [createdPrs, setCreatedPrs] = useState<CreatedPrRecord[]>([]);
   const [createdRfqs, setCreatedRfqs] = useState<CreatedRfqRecord[]>([]);
@@ -9803,32 +9857,61 @@ export default function Home() {
   return (
     <div className="min-h-screen">
       <aside className="fixed inset-y-0 left-0 hidden w-56 border-r bg-card md:flex md:flex-col">
-        <div className="border-b px-5 py-4">
-          <p className="text-base font-semibold">SupplyOS</p>
-          <p className="text-xs text-muted-foreground">SCM System</p>
-        </div>
-        <nav className="flex-1 space-y-1 p-3">
-          {modules.map((module) => {
-            const Icon = module.icon;
-            return (
-              <Button
-                key={module.label}
-                variant={activeModule === module.label ? "default" : "ghost"}
-                className="h-9 w-full justify-start gap-2"
-                onClick={() => setActiveModule(module.label)}
-              >
-                <Icon className="h-4 w-4" />
-                {module.label}
-              </Button>
-            );
-          })}
-        </nav>
+        <ModuleSidebar activeModule={activeModule} onSelectModule={setActiveModule} />
       </aside>
+
+      {mobileNavOpen ? (
+        <>
+          <div
+            className="fixed inset-0 z-30 bg-black/50 md:hidden"
+            onClick={() => setMobileNavOpen(false)}
+            aria-hidden
+          />
+          <aside
+            className="fixed inset-y-0 left-0 z-40 flex w-56 max-w-[85vw] flex-col border-r bg-card shadow-lg md:hidden"
+            role="dialog"
+            aria-modal="true"
+            aria-label="App navigation"
+          >
+            <ModuleSidebar
+              activeModule={activeModule}
+              onSelectModule={(m) => {
+                setActiveModule(m);
+                setMobileNavOpen(false);
+              }}
+              headerExtra={
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="shrink-0"
+                  onClick={() => setMobileNavOpen(false)}
+                  aria-label="Close menu"
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              }
+            />
+          </aside>
+        </>
+      ) : null}
 
       <div className="md:pl-56">
         <header className="sticky top-0 z-20 border-b bg-card/95 backdrop-blur">
           <div className="flex h-[4.5rem] items-center gap-3 px-4 md:px-6">
-            <h1 className="w-36 text-sm font-semibold">{activeModule}</h1>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="shrink-0 md:hidden"
+              onClick={() => setMobileNavOpen(true)}
+              aria-label="Open menu"
+            >
+              <Menu className="h-5 w-5" />
+            </Button>
+            <h1 className="min-w-0 flex-1 truncate text-sm font-semibold md:w-36 md:flex-none">
+              {activeModule}
+            </h1>
             <div className="relative hidden max-w-xl flex-1 md:block">
               <Search className="pointer-events-none absolute top-2.5 left-3 h-4 w-4 text-slate-400" />
               <Input placeholder="Search suppliers, PR, PO, RFQ, stock..." className="h-9 pl-9" />

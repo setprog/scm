@@ -648,64 +648,68 @@ export function InventoryModule() {
 
       {tab === "Stock" && (
         <div className="space-y-6">
-          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
-            <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <div className="relative w-72 max-w-full shrink-0">
-                <Search className="pointer-events-none absolute top-2.5 left-3 h-4 w-4 text-muted-foreground" />
-                <Input
-                  className="h-9 pl-9 text-xs"
-                  placeholder="Search by item name"
-                  value={stockSearch}
-                  onChange={(e) => setStockSearch(e.target.value)}
-                />
-              </div>
-              <select
-                className={filterSelect}
-                value={stockCategoryFilter}
-                onChange={(e) => setStockCategoryFilter(e.target.value)}
-              >
-                <option value="All">All categories</option>
-                <option value="Item">Item</option>
-                <option value="Tool">Tool</option>
-                <option value="Asset">Asset</option>
-              </select>
-              <select
-                className={filterSelect}
-                value={stockStatusFilter}
-                onChange={(e) => setStockStatusFilter(e.target.value)}
-              >
-                <option value="All">All statuses</option>
-                <option value="In Stock">In Stock</option>
-                <option value="Low Stock">Low Stock</option>
-                <option value="Out of Stock">Out of Stock</option>
-              </select>
-              <select className={filterSelect} value={stockLocFilter} onChange={(e) => setStockLocFilter(e.target.value)}>
-                <option value="">All locations</option>
-                {locations.map((l) => (
-                  <option key={l.id} value={l.id}>
-                    {l.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
-              <Button type="button" variant="outline" size="sm" className="h-9" onClick={openMovementModal}>
-                New movement
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                className="h-9 min-w-[7.5rem] text-white hover:opacity-90"
-                style={{ backgroundColor: PRIMARY }}
-                onClick={openAddItemModal}
-              >
-                <Plus className="mr-1 h-3.5 w-3.5" />
-                Add item
-              </Button>
-            </div>
-          </div>
-
           <div className="overflow-x-auto rounded-lg bg-card shadow-sm ring-1 ring-slate-100/80">
+            <div className="space-y-3 px-4 pt-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <h3 className="text-sm font-semibold text-foreground">Stock</h3>
+                <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                  <Button type="button" variant="outline" size="sm" className="h-9" onClick={openMovementModal}>
+                    New movement
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="h-9 min-w-[7.5rem] text-white hover:opacity-90"
+                    style={{ backgroundColor: PRIMARY }}
+                    onClick={openAddItemModal}
+                  >
+                    <Plus className="mr-1 h-3.5 w-3.5" />
+                    Add item
+                  </Button>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="relative w-72 max-w-full shrink-0">
+                  <Search className="pointer-events-none absolute top-2.5 left-3 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    className="h-9 pl-9 text-xs"
+                    placeholder="Search by item name"
+                    value={stockSearch}
+                    onChange={(e) => setStockSearch(e.target.value)}
+                  />
+                </div>
+                <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2">
+                  <select
+                    className={filterSelect}
+                    value={stockCategoryFilter}
+                    onChange={(e) => setStockCategoryFilter(e.target.value)}
+                  >
+                    <option value="All">All categories</option>
+                    <option value="Item">Item</option>
+                    <option value="Tool">Tool</option>
+                    <option value="Asset">Asset</option>
+                  </select>
+                  <select
+                    className={filterSelect}
+                    value={stockStatusFilter}
+                    onChange={(e) => setStockStatusFilter(e.target.value)}
+                  >
+                    <option value="All">All statuses</option>
+                    <option value="In Stock">In Stock</option>
+                    <option value="Low Stock">Low Stock</option>
+                    <option value="Out of Stock">Out of Stock</option>
+                  </select>
+                  <select className={filterSelect} value={stockLocFilter} onChange={(e) => setStockLocFilter(e.target.value)}>
+                    <option value="">All locations</option>
+                    {locations.map((l) => (
+                      <option key={l.id} value={l.id}>
+                        {l.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
             <table className="w-full min-w-[900px] text-left text-xs">
               <thead>
                 <tr className="text-muted-foreground">
@@ -745,37 +749,46 @@ export function InventoryModule() {
 
       {tab === "Movements" && (
         <div className="space-y-6">
-          <div className="flex flex-wrap items-center gap-2">
-            <select className={filterSelect} value={movTypeFilter} onChange={(e) => setMovTypeFilter(e.target.value)}>
-              <option value="All">All movement types</option>
-              <option value="In">In</option>
-              <option value="Out">Out</option>
-              <option value="Transfer">Transfer</option>
-              <option value="Return">Return</option>
-            </select>
-            <Input className="h-9 w-36 shrink-0 text-xs" type="date" value={movDateFrom} onChange={(e) => setMovDateFrom(e.target.value)} />
-            <span className="text-xs text-muted-foreground">to</span>
-            <Input className="h-9 w-36 shrink-0 text-xs" type="date" value={movDateTo} onChange={(e) => setMovDateTo(e.target.value)} />
-            <select className={cn(filterSelect, "sm:w-56")} value={movItemFilter} onChange={(e) => setMovItemFilter(e.target.value)}>
-              <option value="">All items</option>
-              {itemOptions.map((n) => (
-                <option key={n} value={n}>
-                  {n}
-                </option>
-              ))}
-            </select>
-            <div className="relative min-w-[12rem] flex-1 sm:max-w-xs">
-              <Search className="pointer-events-none absolute top-2.5 left-3 h-4 w-4 text-muted-foreground" />
-              <Input
-                className="h-9 pl-9 text-xs"
-                placeholder="Search reference…"
-                value={movSearch}
-                onChange={(e) => setMovSearch(e.target.value)}
-              />
-            </div>
-          </div>
-
           <div className="overflow-x-auto rounded-lg bg-card shadow-sm ring-1 ring-slate-100/80">
+            <div className="space-y-3 px-4 pt-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <h3 className="text-sm font-semibold text-foreground">Movements</h3>
+                <Button type="button" variant="outline" size="sm" className="h-9" onClick={openMovementModal}>
+                  New movement
+                </Button>
+              </div>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="relative w-72 max-w-full shrink-0">
+                  <Search className="pointer-events-none absolute top-2.5 left-3 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    className="h-9 pl-9 text-xs"
+                    placeholder="Search reference…"
+                    value={movSearch}
+                    onChange={(e) => setMovSearch(e.target.value)}
+                  />
+                </div>
+                <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2">
+                  <select className={filterSelect} value={movTypeFilter} onChange={(e) => setMovTypeFilter(e.target.value)}>
+                    <option value="All">All movement types</option>
+                    <option value="In">In</option>
+                    <option value="Out">Out</option>
+                    <option value="Transfer">Transfer</option>
+                    <option value="Return">Return</option>
+                  </select>
+                  <Input className="h-9 w-36 shrink-0 text-xs" type="date" value={movDateFrom} onChange={(e) => setMovDateFrom(e.target.value)} />
+                  <span className="text-xs text-muted-foreground">to</span>
+                  <Input className="h-9 w-36 shrink-0 text-xs" type="date" value={movDateTo} onChange={(e) => setMovDateTo(e.target.value)} />
+                  <select className={cn(filterSelect, "sm:w-56")} value={movItemFilter} onChange={(e) => setMovItemFilter(e.target.value)}>
+                    <option value="">All items</option>
+                    {itemOptions.map((n) => (
+                      <option key={n} value={n}>
+                        {n}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
             <table className="w-full min-w-[960px] text-left text-xs">
               <thead>
                 <tr className="text-muted-foreground">

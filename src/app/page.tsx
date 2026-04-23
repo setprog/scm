@@ -26,7 +26,7 @@ import {
   FileText,
   HandCoins,
   LayoutGrid,
-  MoreHorizontal,
+  MoreVertical,
   Eye,
   Download,
   Package,
@@ -40,7 +40,7 @@ import {
   ClipboardList,
   CheckSquare,
 } from "lucide-react";
-import { TableDeleteIconButton, TableEditIconButton } from "@/components/table-action-icon-buttons";
+import { TableActionsMenu } from "@/components/table-action-icon-buttons";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -71,9 +71,9 @@ type ProcurementTab =
   | "RFQ"
   | "Purchase Order"
   | "Settings";
-type ProcurementSettingsSegment = "uom" | "item";
 type ProcurementUomRow = { id: string; unitName: string; abbreviation: string; description: string };
 type ProcurementItemCategoryRow = { id: string; categoryName: string; description: string; createdAt: string };
+type ProcurementNamedSettingsRow = { id: string; name: string; description: string; updatedAt: string };
 
 const modules: { label: MainModule; icon: React.ElementType }[] = [
   { label: "Dashboard", icon: LayoutGrid },
@@ -131,16 +131,20 @@ type DrawerKey =
 type ItemMasterRow = {
   id: string;
   itemName: string;
-  prm: string;
-  subSolutions: string[];
+  itemCode: string;
+  description: string;
+  category: string;
+  unitOfMeasure: string;
 };
 
 function createEmptyItemRow(): ItemMasterRow {
   return {
     id: typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random()),
     itemName: "",
-    prm: "",
-    subSolutions: [""],
+    itemCode: "",
+    description: "",
+    category: "",
+    unitOfMeasure: "",
   };
 }
 
@@ -300,6 +304,17 @@ function PurchaseRequisitionForm({ onClose, onSubmit }: { onClose: () => void; o
   const [bomRows, setBomRows] = useState<PrBomRow[]>(() => [createEmptyBomRow()]);
   const [formError, setFormError] = useState<string | null>(null);
   const [uploadParseError, setUploadParseError] = useState<string | null>(null);
+  const [customItemOptions, setCustomItemOptions] = useState<Array<{ name: string; uom: string }>>([]);
+  const [activeItemPickerRowId, setActiveItemPickerRowId] = useState<string | null>(null);
+  const [createItemModalOpen, setCreateItemModalOpen] = useState(false);
+  const [createItemTargetRowId, setCreateItemTargetRowId] = useState<string | null>(null);
+  const [newItemDraft, setNewItemDraft] = useState({
+    itemName: "",
+    itemCode: "",
+    description: "",
+    category: "",
+    unitOfMeasure: "",
+  });
 
   const allOperationalBills = useMemo(() => {
     return Object.values(PR_PROJECT_BILLS).flatMap((group) => [...group.boq, ...group.bom]);
@@ -317,6 +332,18 @@ function PurchaseRequisitionForm({ onClose, onSubmit }: { onClose: () => void; o
       materialSourceType === "Bill of Quantities" ? doc.id.startsWith("boq") : doc.id.startsWith("bom")
     );
   }, [allOperationalBills, materialSourceType]);
+
+  const systemItemOptions = useMemo(() => {
+    const fromBills = Object.values(PR_PROJECT_BILLS)
+      .flatMap((group) => [...group.boq, ...group.bom])
+      .flatMap((doc) => doc.lines.map((line) => ({ name: line.itemName.trim(), uom: line.unitOfMeasure.trim() })));
+    const all = [...fromBills, ...customItemOptions].filter((x) => x.name);
+    const unique = new Map<string, { name: string; uom: string }>();
+    for (const item of all) {
+      if (!unique.has(item.name.toLowerCase())) unique.set(item.name.toLowerCase(), item);
+    }
+    return Array.from(unique.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [customItemOptions]);
 
   const updateBomRow = useCallback((id: string, patch: Partial<Omit<PrBomRow, "id">>) => {
     setBomRows((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
@@ -466,6 +493,24 @@ function PurchaseRequisitionForm({ onClose, onSubmit }: { onClose: () => void; o
     onClose();
   }, [kind, prType, linkedProject, department, justification, bomRows, onSubmit, onClose]);
 
+  const itemMatchesForQuery = useCallback(
+    (query: string) => {
+      const q = query.trim().toLowerCase();
+      if (!q) return systemItemOptions.slice(0, 8);
+      return systemItemOptions.filter((opt) => opt.name.toLowerCase().includes(q)).slice(0, 8);
+    },
+    [systemItemOptions]
+  );
+
+  const isBomItemLinkedToMaster = useCallback(
+    (itemName: string) => {
+      const t = itemName.trim().toLowerCase();
+      if (!t) return false;
+      return systemItemOptions.some((opt) => opt.name.toLowerCase() === t);
+    },
+    [systemItemOptions]
+  );
+
   return (
     <>
       <div className="no-scrollbar max-h-[min(70vh,520px)] space-y-5 overflow-y-auto pr-1">
@@ -611,7 +656,75 @@ function PurchaseRequisitionForm({ onClose, onSubmit }: { onClose: () => void; o
                   ) : null}
                 </div>
                 <div className="grid gap-3 sm:grid-cols-2">
-                  <div className="space-y-1"><label className="text-xs font-medium text-foreground">Item / Service Name</label><Input className="h-9 text-xs" value={row.itemName} onChange={(e) => updateBomRow(row.id, { itemName: e.target.value })} /></div>
+                  <div className="relative space-y-1">
+                    <label className="text-xs font-medium text-foreground">Item / Service Name</label>
+                    <Input
+                      className={cn(
+                        "h-9 text-xs",
+                        isBomItemLinkedToMaster(row.itemName) &&
+                          "border-primary/80 bg-primary/5 font-medium text-foreground"
+                      )}
+                      value={row.itemName}
+                      onFocus={() => setActiveItemPickerRowId(row.id)}
+                      onBlur={() => {
+                        setTimeout(() => setActiveItemPickerRowId((prev) => (prev === row.id ? null : prev)), 120);
+                      }}
+                      onChange={(e) => updateBomRow(row.id, { itemName: e.target.value })}
+                      data-item-linked={isBomItemLinkedToMaster(row.itemName) ? "true" : undefined}
+                    />
+                    {activeItemPickerRowId === row.id ? (
+                      <div
+                        className="absolute z-20 mt-1 w-full rounded-md border bg-card p-1 shadow-md"
+                        onMouseDown={(e) => e.preventDefault()}
+                      >
+                        {itemMatchesForQuery(row.itemName).length > 0 ? (
+                          itemMatchesForQuery(row.itemName).map((opt) => (
+                            <button
+                              key={`${row.id}-${opt.name}`}
+                              type="button"
+                              className="flex w-full items-center justify-between rounded px-2 py-1.5 text-left text-xs hover:bg-muted/50"
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => {
+                                updateBomRow(row.id, {
+                                  itemName: opt.name,
+                                  unitOfMeasure: row.unitOfMeasure || opt.uom || row.unitOfMeasure,
+                                });
+                                setActiveItemPickerRowId(null);
+                              }}
+                            >
+                              <span className="truncate">{opt.name}</span>
+                              <span className="text-muted-foreground">{opt.uom || "-"}</span>
+                            </button>
+                          ))
+                        ) : (
+                          <div className="flex items-center justify-between gap-2 px-2 py-1.5 text-xs">
+                            <span className="text-muted-foreground">Not found</span>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              className="h-7 border-primary !bg-transparent px-2 text-primary hover:border-primary hover:!bg-transparent hover:text-primary"
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => {
+                                setCreateItemTargetRowId(row.id);
+                                setNewItemDraft({
+                                  itemName: row.itemName.trim(),
+                                  itemCode: "",
+                                  description: "",
+                                  category: "",
+                                  unitOfMeasure: row.unitOfMeasure || "",
+                                });
+                                setCreateItemModalOpen(true);
+                                setActiveItemPickerRowId(null);
+                              }}
+                            >
+                              Add
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    ) : null}
+                  </div>
                   <div className="space-y-1"><label className="text-xs font-medium text-foreground">Quantity</label><Input className="h-9 text-xs" value={row.quantity} onChange={(e) => updateBomRow(row.id, { quantity: e.target.value })} /></div>
                   <div className="space-y-1"><label className="text-xs font-medium text-foreground">Unit of Measurement</label><Input className="h-9 text-xs" value={row.unitOfMeasure} onChange={(e) => updateBomRow(row.id, { unitOfMeasure: e.target.value })} /></div>
                   <div className="space-y-1"><label className="text-xs font-medium text-foreground">Specifications</label><Input className="h-9 text-xs" value={row.specification} onChange={(e) => updateBomRow(row.id, { specification: e.target.value })} /></div>
@@ -636,6 +749,67 @@ function PurchaseRequisitionForm({ onClose, onSubmit }: { onClose: () => void; o
         <Button className="h-8 min-w-24" onClick={submitPr}>Save</Button>
       </div>
       {formError ? <p className="mt-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">{formError}</p> : null}
+
+      {createItemModalOpen ? (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="pr-create-item-title">
+          <button type="button" className="absolute inset-0 bg-black/40" aria-label="Close dialog" onClick={() => setCreateItemModalOpen(false)} />
+          <div className="relative z-10 w-full max-w-md rounded-lg border bg-card p-4 shadow-lg">
+            <div className="flex items-center justify-between gap-2">
+              <h3 id="pr-create-item-title" className="text-sm font-semibold">
+                Create Item
+              </h3>
+              <Button variant="ghost" size="icon-sm" onClick={() => setCreateItemModalOpen(false)} aria-label="Close modal">
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+            <div className="mt-3 grid gap-3 text-xs sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <label className="text-muted-foreground">Item Name</label>
+                <Input className="h-9" value={newItemDraft.itemName} onChange={(e) => setNewItemDraft((p) => ({ ...p, itemName: e.target.value }))} />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-muted-foreground">Item Code</label>
+                <Input className="h-9" value={newItemDraft.itemCode} onChange={(e) => setNewItemDraft((p) => ({ ...p, itemCode: e.target.value }))} />
+              </div>
+              <div className="space-y-1.5 sm:col-span-2">
+                <label className="text-muted-foreground">Description</label>
+                <Input className="h-9" value={newItemDraft.description} onChange={(e) => setNewItemDraft((p) => ({ ...p, description: e.target.value }))} />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-muted-foreground">Category</label>
+                <Input className="h-9" value={newItemDraft.category} onChange={(e) => setNewItemDraft((p) => ({ ...p, category: e.target.value }))} />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-muted-foreground">Unit of Measure</label>
+                <Input className="h-9" value={newItemDraft.unitOfMeasure} onChange={(e) => setNewItemDraft((p) => ({ ...p, unitOfMeasure: e.target.value }))} />
+              </div>
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
+              <Button type="button" size="sm" variant="outline" onClick={() => setCreateItemModalOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => {
+                  const itemName = newItemDraft.itemName.trim();
+                  if (!itemName) return;
+                  setCustomItemOptions((prev) => [...prev, { name: itemName, uom: newItemDraft.unitOfMeasure.trim() }]);
+                  if (createItemTargetRowId) {
+                    updateBomRow(createItemTargetRowId, {
+                      itemName,
+                      unitOfMeasure: newItemDraft.unitOfMeasure.trim(),
+                    });
+                  }
+                  setCreateItemModalOpen(false);
+                }}
+              >
+                Save
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </>
   );
 }
@@ -1739,30 +1913,6 @@ function ItemMasterDataForm({ onClose, onSubmit }: { onClose: () => void; onSubm
     setRows((prev) => (prev.length <= 1 ? prev : prev.filter((r) => r.id !== id)));
   }, []);
 
-  const addSubSolution = useCallback((id: string) => {
-    setRows((prev) => prev.map((r) => (r.id === id ? { ...r, subSolutions: [...r.subSolutions, ""] } : r)));
-  }, []);
-
-  const updateSubSolution = useCallback((id: string, idx: number, value: string) => {
-    setRows((prev) =>
-      prev.map((r) =>
-        r.id === id
-          ? { ...r, subSolutions: r.subSolutions.map((s, i) => (i === idx ? value : s)) }
-          : r
-      )
-    );
-  }, []);
-
-  const removeSubSolution = useCallback((id: string, idx: number) => {
-    setRows((prev) =>
-      prev.map((r) => {
-        if (r.id !== id) return r;
-        if (r.subSolutions.length <= 1) return r;
-        return { ...r, subSolutions: r.subSolutions.filter((_, i) => i !== idx) };
-      })
-    );
-  }, []);
-
   return (
     <>
       <div className="no-scrollbar max-h-[min(60vh,420px)] space-y-5 overflow-y-auto pr-1">
@@ -1790,7 +1940,7 @@ function ItemMasterDataForm({ onClose, onSubmit }: { onClose: () => void; onSubm
             ) : null}
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="flex flex-col gap-3">
-                <label className="text-xs font-medium text-foreground">Name</label>
+                <label className="text-xs font-medium text-foreground">Item Name</label>
                 <Input
                   className="h-9"
                   placeholder=""
@@ -1799,53 +1949,40 @@ function ItemMasterDataForm({ onClose, onSubmit }: { onClose: () => void; onSubm
                 />
               </div>
               <div className="flex flex-col gap-3">
-                <label className="text-xs font-medium text-foreground">PRM</label>
-                <select
-                  className="h-9 w-full rounded-md border border-input bg-background px-3 text-xs"
-                  value={row.prm}
-                  onChange={(e) => updateRow(row.id, { prm: e.target.value })}
-                >
-                  <option value="">Select PRM</option>
-                  <option value="Alex Johnson">Alex Johnson</option>
-                  <option value="Sarah Smith">Sarah Smith</option>
-                  <option value="Liam Gomez">Liam Gomez</option>
-                  <option value="Maya Ibrahim">Maya Ibrahim</option>
-                </select>
+                <label className="text-xs font-medium text-foreground">Item Code</label>
+                <Input
+                  className="h-9"
+                  placeholder=""
+                  value={row.itemCode}
+                  onChange={(e) => updateRow(row.id, { itemCode: e.target.value })}
+                />
               </div>
-              <div className="flex flex-col gap-2 sm:col-span-2">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-medium text-foreground">Sub-solutions</label>
-                </div>
-                <div className="space-y-2">
-                  {row.subSolutions.map((sub, idx) => (
-                    <div key={`${row.id}-sub-${idx}`} className="flex items-center gap-2">
-                      <Input
-                        className="h-9"
-                        placeholder={`Sub-solution ${idx + 1}`}
-                        value={sub}
-                        onChange={(e) => updateSubSolution(row.id, idx, e.target.value)}
-                      />
-                      {idx === 0 ? (
-                        <Button type="button" size="sm" variant="outline" className="h-7 shrink-0 text-[11px]" onClick={() => addSubSolution(row.id)}>
-                          <Plus className="h-3.5 w-3.5" />
-                          Add
-                        </Button>
-                      ) : null}
-                      {row.subSolutions.length > 1 ? (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon-sm"
-                          className="h-8 w-8 shrink-0"
-                          onClick={() => removeSubSolution(row.id, idx)}
-                          aria-label="Remove sub-solution"
-                        >
-                          <X className="h-4 w-4" />
-                        </Button>
-                      ) : null}
-                    </div>
-                  ))}
-                </div>
+              <div className="flex flex-col gap-3 sm:col-span-2">
+                <label className="text-xs font-medium text-foreground">Description</label>
+                <Input
+                  className="h-9"
+                  placeholder=""
+                  value={row.description}
+                  onChange={(e) => updateRow(row.id, { description: e.target.value })}
+                />
+              </div>
+              <div className="flex flex-col gap-3">
+                <label className="text-xs font-medium text-foreground">Category</label>
+                <Input
+                  className="h-9"
+                  placeholder=""
+                  value={row.category}
+                  onChange={(e) => updateRow(row.id, { category: e.target.value })}
+                />
+              </div>
+              <div className="flex flex-col gap-3">
+                <label className="text-xs font-medium text-foreground">Unit of Measure</label>
+                <Input
+                  className="h-9"
+                  placeholder=""
+                  value={row.unitOfMeasure}
+                  onChange={(e) => updateRow(row.id, { unitOfMeasure: e.target.value })}
+                />
               </div>
             </div>
           </div>
@@ -1864,11 +2001,15 @@ function ItemMasterDataForm({ onClose, onSubmit }: { onClose: () => void; onSubm
         <Button
           className="h-8 min-w-24"
           onClick={() => {
-            const validRows = rows.filter((r) => r.itemName.trim() && r.prm && r.subSolutions.some((s) => s.trim()));
+            const validRows = rows.filter((r) => r.itemName.trim() && r.itemCode.trim() && r.category.trim());
             if (validRows.length === 0) return;
             onSubmit(validRows.map((r) => ({
               ...r,
-              subSolutions: r.subSolutions.map((s) => s.trim()).filter(Boolean),
+              itemName: r.itemName.trim(),
+              itemCode: r.itemCode.trim(),
+              description: r.description.trim(),
+              category: r.category.trim(),
+              unitOfMeasure: r.unitOfMeasure.trim(),
               id: typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random())
             })));
             onClose();
@@ -2468,7 +2609,6 @@ function ProcurementModule({
     "Purchase Order",
     "Settings",
   ];
-  const [settingsSegment, setSettingsSegment] = useState<ProcurementSettingsSegment>("uom");
   const [uomRows, setUomRows] = useState<ProcurementUomRow[]>([
     { id: "uom-1", unitName: "Each", abbreviation: "ea", description: "Count of discrete items" },
     { id: "uom-2", unitName: "Kilogram", abbreviation: "kg", description: "Standard mass for materials" },
@@ -2482,8 +2622,18 @@ function ProcurementModule({
     },
     { id: "ic-2", categoryName: "MRO", description: "Maintenance, repair, and operations supplies", createdAt: "2026-04-02" },
   ]);
+  const [businessUnitRows, setBusinessUnitRows] = useState<ProcurementNamedSettingsRow[]>([
+    { id: "bu-1", name: "Operations", description: "Supports field and plant operations", updatedAt: "2026-04-12" },
+    { id: "bu-2", name: "Corporate Services", description: "Shared services and admin functions", updatedAt: "2026-04-10" },
+  ]);
+  const [sectorRows, setSectorRows] = useState<ProcurementNamedSettingsRow[]>([
+    { id: "sec-1", name: "Construction", description: "Civil and infrastructure procurement", updatedAt: "2026-04-11" },
+    { id: "sec-2", name: "Energy", description: "Power and utilities supply categories", updatedAt: "2026-04-09" },
+  ]);
   const [createUomOpen, setCreateUomOpen] = useState(false);
   const [createItemCategoryOpen, setCreateItemCategoryOpen] = useState(false);
+  const [createBusinessUnitOpen, setCreateBusinessUnitOpen] = useState(false);
+  const [createSectorOpen, setCreateSectorOpen] = useState(false);
   const [newUomUnitName, setNewUomUnitName] = useState("");
   const [newUomAbbrev, setNewUomAbbrev] = useState("");
   const [newUomDescription, setNewUomDescription] = useState("");
@@ -2491,6 +2641,12 @@ function ProcurementModule({
   const [newItemCategoryName, setNewItemCategoryName] = useState("");
   const [newItemCategoryDescription, setNewItemCategoryDescription] = useState("");
   const [itemCategoryEditId, setItemCategoryEditId] = useState<string | null>(null);
+  const [newBusinessUnitName, setNewBusinessUnitName] = useState("");
+  const [newBusinessUnitDescription, setNewBusinessUnitDescription] = useState("");
+  const [businessUnitEditId, setBusinessUnitEditId] = useState<string | null>(null);
+  const [newSectorName, setNewSectorName] = useState("");
+  const [newSectorDescription, setNewSectorDescription] = useState("");
+  const [sectorEditId, setSectorEditId] = useState<string | null>(null);
   const [uomSettingsSearch, setUomSettingsSearch] = useState("");
   const [itemCategorySettingsSearch, setItemCategorySettingsSearch] = useState("");
 
@@ -2640,8 +2796,33 @@ function ProcurementModule({
   const [poEditRow, setPoEditRow] = useState<PoRow | null>(null);
   const [poGenerateRow, setPoGenerateRow] = useState<PoRow | null>(null);
   const [masterDataRows, setMasterDataRows] = useState<ItemMasterRow[]>([
-    { id: "md-1", itemName: "Cast Iron Valve", prm: "Sarah Smith", subSolutions: ["Valve Assembly", "Pressure Control"] },
-    { id: "md-2", itemName: "Packing Tape", prm: "Alex Johnson", subSolutions: ["Warehouse Packaging"] },
+    {
+      id: "md-1",
+      itemName: "HP ProBook 450 G8",
+      itemCode: "ITM-HP-450G8",
+      description: "Business laptop for field and office users",
+      category: "Laptop",
+      unitOfMeasure: "pcs",
+    },
+    {
+      id: "md-2",
+      itemName: "Cisco Catalyst 9200",
+      itemCode: "ITM-CS-9200",
+      description: "Access switch for enterprise network rollout",
+      category: "Network Hardware",
+      unitOfMeasure: "unit",
+    },
+  ]);
+  const [masterDataModalOpen, setMasterDataModalOpen] = useState(false);
+  const [masterDataEditId, setMasterDataEditId] = useState<string | null>(null);
+  const [masterDataDrafts, setMasterDataDrafts] = useState<Array<Omit<ItemMasterRow, "id">>>([
+    {
+      itemName: "",
+      itemCode: "",
+      description: "",
+      category: "",
+      unitOfMeasure: "",
+    },
   ]);
   const [activeRfqId, setActiveRfqId] = useState<string | null>(null);
   const [rfqViewTab, setRfqViewTab] = useState<"details" | "items" | "suppliers">("details");
@@ -2819,6 +3000,33 @@ function ProcurementModule({
     if (createdMasterDataRows.length === 0) return;
     setMasterDataRows((prev) => [...createdMasterDataRows, ...prev.filter((p) => !createdMasterDataRows.some((c) => c.id === p.id))]);
   }, [createdMasterDataRows]);
+
+  const openMasterDataModal = useCallback((row?: ItemMasterRow) => {
+    if (row) {
+      setMasterDataEditId(row.id);
+      setMasterDataDrafts([
+        {
+          itemName: row.itemName,
+          itemCode: row.itemCode,
+          description: row.description,
+          category: row.category,
+          unitOfMeasure: row.unitOfMeasure,
+        },
+      ]);
+    } else {
+      setMasterDataEditId(null);
+      setMasterDataDrafts([
+        {
+          itemName: "",
+          itemCode: "",
+          description: "",
+          category: "",
+          unitOfMeasure: "",
+        },
+      ]);
+    }
+    setMasterDataModalOpen(true);
+  }, []);
 
   const filteredPrRows = useMemo(
     () =>
@@ -3103,25 +3311,31 @@ function ProcurementModule({
           <Card>
             <CardContent className="space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <Input className="h-9 w-72" placeholder="Search name, PRM, sub-solution..." />
-                <Button size="sm" className="h-8 min-w-24" onClick={() => onOpenDrawer("master-data")}>
+                <h3 className="text-sm font-semibold">Master Data</h3>
+                <Button size="sm" className="h-8 min-w-24" onClick={() => openMasterDataModal()}>
                   <Plus className="h-3.5 w-3.5" />
                   Create
                 </Button>
+              </div>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <Input className="h-9 min-w-[220px] flex-1 sm:max-w-md" placeholder="Search name, PRM, sub-solution..." />
               </div>
               <div className="overflow-hidden rounded-md">
                 <table className="w-full border-separate border-spacing-y-2 text-left text-xs">
                   <thead className="bg-muted/60">
                     <tr>
-                      <th className="px-3 py-3 font-medium">Name</th>
-                      <th className="px-3 py-3 font-medium">PRM</th>
-                      <th className="px-3 py-3 font-medium">Sub-solutions</th>
+                      <th className="px-3 py-3 font-medium">Item Name</th>
+                      <th className="px-3 py-3 font-medium">Item Code</th>
+                      <th className="px-3 py-3 font-medium">Description</th>
+                      <th className="px-3 py-3 font-medium">Category</th>
+                      <th className="px-3 py-3 font-medium">Unit of Measure</th>
+                      <th className="px-3 py-3 font-medium">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
                     {masterDataRows.length === 0 ? (
                       <tr>
-                        <td className="px-3 py-4 text-xs text-muted-foreground" colSpan={4}>
+                        <td className="px-3 py-4 text-xs text-muted-foreground" colSpan={6}>
                           No master data records yet. Create one to get started.
                         </td>
                       </tr>
@@ -3129,8 +3343,16 @@ function ProcurementModule({
                       masterDataRows.map((row) => (
                         <tr key={row.id} className="border-t">
                           <td className="px-3 py-2">{row.itemName}</td>
-                          <td className="px-3 py-2">{row.prm || "-"}</td>
-                          <td className="px-3 py-2">{row.subSolutions.length ? row.subSolutions.join(", ") : "-"}</td>
+                          <td className="px-3 py-2">{row.itemCode || "-"}</td>
+                          <td className="px-3 py-2">{row.description || "-"}</td>
+                          <td className="px-3 py-2">{row.category || "-"}</td>
+                          <td className="px-3 py-2">{row.unitOfMeasure || "-"}</td>
+                          <td className="px-3 py-2">
+                            <TableActionsMenu
+                              onEdit={() => openMasterDataModal(row)}
+                              onDelete={() => setMasterDataRows((prev) => prev.filter((r) => r.id !== row.id))}
+                            />
+                          </td>
                         </tr>
                       ))
                     )}
@@ -3139,60 +3361,177 @@ function ProcurementModule({
               </div>
             </CardContent>
           </Card>
+
+          {masterDataModalOpen ? (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="master-data-item-title">
+              <button type="button" className="absolute inset-0 bg-black/40" aria-label="Close dialog" onClick={() => setMasterDataModalOpen(false)} />
+              <div className="relative z-10 w-full max-w-md rounded-lg border bg-card p-4 shadow-lg">
+                <div className="flex items-center justify-between gap-2">
+                  <h3 id="master-data-item-title" className="text-sm font-semibold">
+                    {masterDataEditId ? "Edit Item Master Data" : "Create Item Master Data"}
+                  </h3>
+                  <Button variant="ghost" size="icon-sm" onClick={() => setMasterDataModalOpen(false)} aria-label="Close modal">
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+                <div className="no-scrollbar mt-3 max-h-[60vh] space-y-3 overflow-y-auto pr-1 text-xs">
+                  {masterDataDrafts.map((draft, idx) => {
+                    const multi = masterDataDrafts.length >= 2;
+                    return (
+                      <div
+                        key={`master-data-draft-${idx}`}
+                        className={cn(
+                          "space-y-3",
+                          multi && "relative rounded-md border border-border p-3 pr-10"
+                        )}
+                      >
+                        {multi ? (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-sm"
+                            className="absolute right-1 top-1"
+                            onClick={() =>
+                              setMasterDataDrafts((prev) => (prev.length <= 1 ? prev : prev.filter((_, i) => i !== idx)))
+                            }
+                            aria-label="Remove item"
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        ) : null}
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          <div className="space-y-1.5">
+                            <label className="text-muted-foreground">Item Name</label>
+                            <Input
+                              className="h-9"
+                              value={draft.itemName}
+                              onChange={(e) =>
+                                setMasterDataDrafts((prev) => prev.map((d, i) => (i === idx ? { ...d, itemName: e.target.value } : d)))
+                              }
+                            />
+                          </div>
+                          <div className="space-y-1.5">
+                            <label className="text-muted-foreground">Item Code</label>
+                            <Input
+                              className="h-9"
+                              value={draft.itemCode}
+                              onChange={(e) =>
+                                setMasterDataDrafts((prev) => prev.map((d, i) => (i === idx ? { ...d, itemCode: e.target.value } : d)))
+                              }
+                            />
+                          </div>
+                          <div className="space-y-1.5 sm:col-span-2">
+                            <label className="text-muted-foreground">Description</label>
+                            <Input
+                              className="h-9"
+                              value={draft.description}
+                              onChange={(e) =>
+                                setMasterDataDrafts((prev) => prev.map((d, i) => (i === idx ? { ...d, description: e.target.value } : d)))
+                              }
+                            />
+                          </div>
+                          <div className="space-y-1.5">
+                            <label className="text-muted-foreground">Category</label>
+                            <Input
+                              className="h-9"
+                              value={draft.category}
+                              onChange={(e) =>
+                                setMasterDataDrafts((prev) => prev.map((d, i) => (i === idx ? { ...d, category: e.target.value } : d)))
+                              }
+                            />
+                          </div>
+                          <div className="space-y-1.5">
+                            <label className="text-muted-foreground">Unit of Measure</label>
+                            <Input
+                              className="h-9"
+                              value={draft.unitOfMeasure}
+                              onChange={(e) =>
+                                setMasterDataDrafts((prev) => prev.map((d, i) => (i === idx ? { ...d, unitOfMeasure: e.target.value } : d)))
+                              }
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                {!masterDataEditId ? (
+                  <div className="mt-3 flex justify-center">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-8 min-w-24 border-primary !bg-transparent text-primary hover:border-primary hover:!bg-transparent hover:text-primary"
+                      onClick={() =>
+                        setMasterDataDrafts((prev) => [
+                          ...prev,
+                          { itemName: "", itemCode: "", description: "", category: "", unitOfMeasure: "" },
+                        ])
+                      }
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      Add
+                    </Button>
+                  </div>
+                ) : null}
+                <div className="mt-4 flex justify-end gap-2">
+                  <Button type="button" size="sm" variant="outline" onClick={() => setMasterDataModalOpen(false)}>
+                    Cancel
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() => {
+                      const validRows = masterDataDrafts
+                        .map((d) => ({
+                          itemName: d.itemName.trim(),
+                          itemCode: d.itemCode.trim(),
+                          description: d.description.trim(),
+                          category: d.category.trim(),
+                          unitOfMeasure: d.unitOfMeasure.trim(),
+                        }))
+                        .filter((d) => d.itemName && d.itemCode && d.category);
+                      if (validRows.length === 0) return;
+                      if (masterDataEditId) {
+                        setMasterDataRows((prev) =>
+                          prev.map((r) =>
+                            r.id === masterDataEditId
+                              ? { ...r, ...validRows[0] }
+                              : r
+                          )
+                        );
+                      } else {
+                        setMasterDataRows((prev) => {
+                          const newRows = validRows.map((row, i) => ({
+                            id: `md-${prev.length + i + 1}`,
+                            ...row,
+                          }));
+                          return [...newRows, ...prev];
+                        });
+                      }
+                      setMasterDataEditId(null);
+                      setMasterDataModalOpen(false);
+                    }}
+                  >
+                    Save
+                  </Button>
+                </div>
+              </div>
+            </div>
+          ) : null}
         </div>
       )}
 
       {tab === "Settings" && (
         <div className="space-y-4">
-          <div
-            className="inline-flex rounded-lg bg-muted/50 p-0.5 text-xs"
-            role="tablist"
-            aria-label="Procurement settings sections"
-          >
-            <button
-              type="button"
-              role="tab"
-              aria-selected={settingsSegment === "uom"}
-              onClick={() => setSettingsSegment("uom")}
-              className={cn(
-                "rounded-md px-3 py-1.5 font-medium transition-colors",
-                settingsSegment === "uom"
-                  ? "bg-background text-primary shadow-sm ring-1 ring-border"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
-            >
-              Unit of Measurement
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={settingsSegment === "item"}
-              onClick={() => setSettingsSegment("item")}
-              className={cn(
-                "rounded-md px-3 py-1.5 font-medium transition-colors",
-                settingsSegment === "item"
-                  ? "bg-background text-primary shadow-sm ring-1 ring-border"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
-            >
-              Item Categories
-            </button>
-          </div>
-
-          {settingsSegment === "uom" && (
-            <Card>
-              <CardContent className="space-y-3 pt-6">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <Input
-                    className="h-9 min-w-0 flex-1"
-                    placeholder="Search unit name, abbreviation, or description…"
-                    value={uomSettingsSearch}
-                    onChange={(e) => setUomSettingsSearch(e.target.value)}
-                    aria-label="Search units of measurement"
-                  />
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <Card size="sm">
+              <CardContent className="space-y-4 pt-0">
+                <div className="flex items-center justify-between gap-3">
+                  <h3 className="text-sm font-semibold">Unit of Measurement</h3>
                   <Button
                     size="sm"
-                    className="h-8 min-w-24 shrink-0 self-center"
+                    className="h-8 w-16 shrink-0"
                     onClick={() => {
                       setUomEditId(null);
                       setNewUomUnitName("");
@@ -3202,10 +3541,10 @@ function ProcurementModule({
                     }}
                   >
                     <Plus className="h-3.5 w-3.5" />
-                    Add Unit
+                    Add
                   </Button>
                 </div>
-                <div className="overflow-hidden rounded-md">
+                <div className="max-h-80 overflow-auto rounded-md">
                   <table className="w-full border-separate border-spacing-y-0 text-left text-xs">
                     <thead className="bg-muted/60">
                       <tr>
@@ -3222,28 +3561,24 @@ function ProcurementModule({
                             No units of measurement yet. Add a unit to get started.
                           </td>
                         </tr>
-                      ) : filteredUomSettingsRows.length === 0 ? (
-                        <tr>
-                          <td className="px-3 py-4 text-muted-foreground" colSpan={4}>
-                            No units match your search.
-                          </td>
-                        </tr>
                       ) : (
-                        filteredUomSettingsRows.map((row) => (
+                        uomRows.map((row) => (
                           <tr key={row.id} className="border-t">
                             <td className="px-3 py-2 font-medium">{row.unitName}</td>
                             <td className="px-3 py-2 text-muted-foreground">{row.abbreviation || "—"}</td>
                             <td className="px-3 py-2 text-muted-foreground">{row.description || "—"}</td>
                             <td className="px-3 py-2">
-                              <TableEditIconButton
-                                onClick={() => {
+                              <TableActionsMenu
+                                onEdit={() => {
                                   setUomEditId(row.id);
                                   setNewUomUnitName(row.unitName);
                                   setNewUomAbbrev(row.abbreviation);
                                   setNewUomDescription(row.description);
                                   setCreateUomOpen(true);
                                 }}
-                                aria-label="Edit unit of measurement"
+                                onDelete={() => {
+                                  setUomRows((prev) => prev.filter((r) => r.id !== row.id));
+                                }}
                               />
                             </td>
                           </tr>
@@ -3254,22 +3589,14 @@ function ProcurementModule({
                 </div>
               </CardContent>
             </Card>
-          )}
 
-          {settingsSegment === "item" && (
-            <Card>
-              <CardContent className="space-y-3 pt-6">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <Input
-                    className="h-9 min-w-0 flex-1"
-                    placeholder="Search category name, description, or date…"
-                    value={itemCategorySettingsSearch}
-                    onChange={(e) => setItemCategorySettingsSearch(e.target.value)}
-                    aria-label="Search item categories"
-                  />
+            <Card size="sm">
+              <CardContent className="space-y-4 pt-0">
+                <div className="flex items-center justify-between gap-3">
+                  <h3 className="text-sm font-semibold">Item Categories</h3>
                   <Button
                     size="sm"
-                    className="h-8 min-w-24 shrink-0 self-center"
+                    className="h-8 w-16 shrink-0"
                     onClick={() => {
                       setItemCategoryEditId(null);
                       setNewItemCategoryName("");
@@ -3278,10 +3605,10 @@ function ProcurementModule({
                     }}
                   >
                     <Plus className="h-3.5 w-3.5" />
-                    Add Category
+                    Add
                   </Button>
                 </div>
-                <div className="overflow-hidden rounded-md">
+                <div className="max-h-80 overflow-auto rounded-md">
                   <table className="w-full border-separate border-spacing-y-0 text-left text-xs">
                     <thead className="bg-muted/60">
                       <tr>
@@ -3298,27 +3625,23 @@ function ProcurementModule({
                             No item categories yet. Add a category to get started.
                           </td>
                         </tr>
-                      ) : filteredItemCategorySettingsRows.length === 0 ? (
-                        <tr>
-                          <td className="px-3 py-4 text-muted-foreground" colSpan={4}>
-                            No categories match your search.
-                          </td>
-                        </tr>
                       ) : (
-                        filteredItemCategorySettingsRows.map((row) => (
+                        itemCategoryRows.map((row) => (
                           <tr key={row.id} className="border-t">
                             <td className="px-3 py-2 font-medium">{row.categoryName}</td>
                             <td className="px-3 py-2 text-muted-foreground">{row.description || "—"}</td>
                             <td className="px-3 py-2 text-muted-foreground">{row.createdAt}</td>
                             <td className="px-3 py-2">
-                              <TableEditIconButton
-                                onClick={() => {
+                              <TableActionsMenu
+                                onEdit={() => {
                                   setItemCategoryEditId(row.id);
                                   setNewItemCategoryName(row.categoryName);
                                   setNewItemCategoryDescription(row.description);
                                   setCreateItemCategoryOpen(true);
                                 }}
-                                aria-label="Edit item category"
+                                onDelete={() => {
+                                  setItemCategoryRows((prev) => prev.filter((r) => r.id !== row.id));
+                                }}
                               />
                             </td>
                           </tr>
@@ -3329,7 +3652,133 @@ function ProcurementModule({
                 </div>
               </CardContent>
             </Card>
-          )}
+
+            <Card size="sm">
+              <CardContent className="space-y-4 pt-0">
+                <div className="flex items-center justify-between gap-3">
+                  <h3 className="text-sm font-semibold">Department</h3>
+                  <Button
+                    size="sm"
+                    className="h-8 w-16 shrink-0"
+                    onClick={() => {
+                      setBusinessUnitEditId(null);
+                      setNewBusinessUnitName("");
+                      setNewBusinessUnitDescription("");
+                      setCreateBusinessUnitOpen(true);
+                    }}
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    Add
+                  </Button>
+                </div>
+                <div className="max-h-80 overflow-auto rounded-md">
+                  <table className="w-full border-separate border-spacing-y-0 text-left text-xs">
+                    <thead className="bg-muted/60">
+                      <tr>
+                        <th className="px-3 py-2.5 font-medium">Name</th>
+                        <th className="px-3 py-2.5 font-medium">Description</th>
+                        <th className="px-3 py-2.5 font-medium">Updated</th>
+                        <th className="px-3 py-2.5 font-medium">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {businessUnitRows.length === 0 ? (
+                        <tr>
+                          <td className="px-3 py-4 text-muted-foreground" colSpan={4}>
+                            No business units yet. Add one to get started.
+                          </td>
+                        </tr>
+                      ) : (
+                        businessUnitRows.map((row) => (
+                          <tr key={row.id} className="border-t">
+                            <td className="px-3 py-2 font-medium">{row.name}</td>
+                            <td className="px-3 py-2 text-muted-foreground">{row.description || "—"}</td>
+                            <td className="px-3 py-2 text-muted-foreground">{row.updatedAt}</td>
+                            <td className="px-3 py-2">
+                              <TableActionsMenu
+                                onEdit={() => {
+                                  setBusinessUnitEditId(row.id);
+                                  setNewBusinessUnitName(row.name);
+                                  setNewBusinessUnitDescription(row.description);
+                                  setCreateBusinessUnitOpen(true);
+                                }}
+                                onDelete={() => {
+                                  setBusinessUnitRows((prev) => prev.filter((r) => r.id !== row.id));
+                                }}
+                              />
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card size="sm">
+              <CardContent className="space-y-4 pt-0">
+                <div className="flex items-center justify-between gap-3">
+                  <h3 className="text-sm font-semibold">Solution</h3>
+                  <Button
+                    size="sm"
+                    className="h-8 w-16 shrink-0"
+                    onClick={() => {
+                      setSectorEditId(null);
+                      setNewSectorName("");
+                      setNewSectorDescription("");
+                      setCreateSectorOpen(true);
+                    }}
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    Add
+                  </Button>
+                </div>
+                <div className="max-h-80 overflow-auto rounded-md">
+                  <table className="w-full border-separate border-spacing-y-0 text-left text-xs">
+                    <thead className="bg-muted/60">
+                      <tr>
+                        <th className="px-3 py-2.5 font-medium">Name</th>
+                        <th className="px-3 py-2.5 font-medium">Description</th>
+                        <th className="px-3 py-2.5 font-medium">Updated</th>
+                        <th className="px-3 py-2.5 font-medium">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sectorRows.length === 0 ? (
+                        <tr>
+                          <td className="px-3 py-4 text-muted-foreground" colSpan={4}>
+                            No sectors yet. Add one to get started.
+                          </td>
+                        </tr>
+                      ) : (
+                        sectorRows.map((row) => (
+                          <tr key={row.id} className="border-t">
+                            <td className="px-3 py-2 font-medium">{row.name}</td>
+                            <td className="px-3 py-2 text-muted-foreground">{row.description || "—"}</td>
+                            <td className="px-3 py-2 text-muted-foreground">{row.updatedAt}</td>
+                            <td className="px-3 py-2">
+                              <TableActionsMenu
+                                onEdit={() => {
+                                  setSectorEditId(row.id);
+                                  setNewSectorName(row.name);
+                                  setNewSectorDescription(row.description);
+                                  setCreateSectorOpen(true);
+                                }}
+                                onDelete={() => {
+                                  setSectorRows((prev) => prev.filter((r) => r.id !== row.id));
+                                }}
+                              />
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
 
           {createUomOpen && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="pc-uom-title">
@@ -3528,6 +3977,169 @@ function ProcurementModule({
               </div>
             </div>
           )}
+
+          {createBusinessUnitOpen && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="pc-bu-title">
+              <button
+                type="button"
+                className="absolute inset-0 bg-black/40"
+                aria-label="Close dialog"
+                onClick={() => {
+                  setBusinessUnitEditId(null);
+                  setCreateBusinessUnitOpen(false);
+                }}
+              />
+              <div className="relative z-10 w-full max-w-md rounded-lg border bg-card p-4 shadow-lg">
+                <h3 id="pc-bu-title" className="text-sm font-semibold">
+                  {businessUnitEditId ? "Edit business unit" : "Add business unit"}
+                </h3>
+                <div className="mt-3 space-y-3 text-xs">
+                  <div className="space-y-1.5">
+                    <label className="text-muted-foreground" htmlFor="pc-bu-name">
+                      Name
+                    </label>
+                    <Input
+                      id="pc-bu-name"
+                      className="h-9"
+                      value={newBusinessUnitName}
+                      onChange={(e) => setNewBusinessUnitName(e.target.value)}
+                      placeholder="e.g. Commercial Operations"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-muted-foreground" htmlFor="pc-bu-desc">
+                      Description
+                    </label>
+                    <Input
+                      id="pc-bu-desc"
+                      className="h-9"
+                      value={newBusinessUnitDescription}
+                      onChange={(e) => setNewBusinessUnitDescription(e.target.value)}
+                      placeholder="Short description"
+                    />
+                  </div>
+                </div>
+                <div className="mt-4 flex justify-end gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setBusinessUnitEditId(null);
+                      setCreateBusinessUnitOpen(false);
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() => {
+                      const name = newBusinessUnitName.trim();
+                      if (!name) return;
+                      const today = new Date().toISOString().slice(0, 10);
+                      setBusinessUnitRows((prev) => {
+                        if (businessUnitEditId) {
+                          return prev.map((r) =>
+                            r.id === businessUnitEditId
+                              ? { ...r, name, description: newBusinessUnitDescription.trim(), updatedAt: today }
+                              : r
+                          );
+                        }
+                        return [
+                          { id: `bu-${prev.length + 1}`, name, description: newBusinessUnitDescription.trim(), updatedAt: today },
+                          ...prev,
+                        ];
+                      });
+                      setBusinessUnitEditId(null);
+                      setCreateBusinessUnitOpen(false);
+                    }}
+                  >
+                    Save
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {createSectorOpen && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="pc-sector-title">
+              <button
+                type="button"
+                className="absolute inset-0 bg-black/40"
+                aria-label="Close dialog"
+                onClick={() => {
+                  setSectorEditId(null);
+                  setCreateSectorOpen(false);
+                }}
+              />
+              <div className="relative z-10 w-full max-w-md rounded-lg border bg-card p-4 shadow-lg">
+                <h3 id="pc-sector-title" className="text-sm font-semibold">
+                  {sectorEditId ? "Edit sector" : "Add sector"}
+                </h3>
+                <div className="mt-3 space-y-3 text-xs">
+                  <div className="space-y-1.5">
+                    <label className="text-muted-foreground" htmlFor="pc-sector-name">
+                      Name
+                    </label>
+                    <Input
+                      id="pc-sector-name"
+                      className="h-9"
+                      value={newSectorName}
+                      onChange={(e) => setNewSectorName(e.target.value)}
+                      placeholder="e.g. Telecommunications"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-muted-foreground" htmlFor="pc-sector-desc">
+                      Description
+                    </label>
+                    <Input
+                      id="pc-sector-desc"
+                      className="h-9"
+                      value={newSectorDescription}
+                      onChange={(e) => setNewSectorDescription(e.target.value)}
+                      placeholder="Short description"
+                    />
+                  </div>
+                </div>
+                <div className="mt-4 flex justify-end gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setSectorEditId(null);
+                      setCreateSectorOpen(false);
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() => {
+                      const name = newSectorName.trim();
+                      if (!name) return;
+                      const today = new Date().toISOString().slice(0, 10);
+                      setSectorRows((prev) => {
+                        if (sectorEditId) {
+                          return prev.map((r) =>
+                            r.id === sectorEditId ? { ...r, name, description: newSectorDescription.trim(), updatedAt: today } : r
+                          );
+                        }
+                        return [{ id: `sec-${prev.length + 1}`, name, description: newSectorDescription.trim(), updatedAt: today }, ...prev];
+                      });
+                      setSectorEditId(null);
+                      setCreateSectorOpen(false);
+                    }}
+                  >
+                    Save
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -3547,9 +4159,20 @@ function ProcurementModule({
           ) : null}
           <Card>
             <CardContent className="space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <h3 className="text-sm font-semibold">Purchase Requisitions</h3>
+                {activeRole === "Field Engineer" ? (
+                  <Button size="sm" className="h-9 min-w-24 shrink-0" onClick={() => onOpenDrawer("pr")}>
+                    <Plus className="h-3.5 w-3.5" />
+                    Create
+                  </Button>
+                ) : null}
+              </div>
               <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
-                <div className="flex min-w-0 flex-wrap items-center gap-2">
+                <div className="flex min-w-0 items-center gap-2">
                   <Input className="h-9 w-72 shrink-0" placeholder="Search PR #, project, requester, items..." />
+                </div>
+                <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2">
                   <ModuleSourceFilterSelects
                     requestSource={prFilters.requestSource}
                     onRequestSourceChange={prFilters.setRequestSource}
@@ -3571,12 +4194,6 @@ function ProcurementModule({
                     <option>Support PRs</option>
                   </select>
                 </div>
-                {activeRole === "Field Engineer" ? (
-                  <Button size="sm" className="h-9 min-w-24 shrink-0 self-center" onClick={() => onOpenDrawer("pr")}>
-                    <Plus className="h-3.5 w-3.5" />
-                    Create
-                  </Button>
-                ) : null}
               </div>
 
               <div className="overflow-hidden rounded-md">
@@ -3619,10 +4236,10 @@ function ProcurementModule({
                               <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
                                   <Button size="icon-sm" variant="ghost" aria-label="Open actions">
-                                    <MoreHorizontal className="h-4 w-4" />
+                                    <MoreVertical className="h-4 w-4" />
                                   </Button>
                                 </DropdownMenuTrigger>
-                                <DropdownMenuContent align="end" className="w-52">
+                                <DropdownMenuContent side="left" align="start" className="w-52">
                                   <DropdownMenuItem onClick={() => setPrDetailRow(row)}>Open</DropdownMenuItem>
                                   {row.status === "Pending Sourcing" ? (
                                     <DropdownMenuItem onClick={() => updatePrStatus(row.ref, "In Sourcing")}>Accept PR</DropdownMenuItem>
@@ -3641,10 +4258,10 @@ function ProcurementModule({
                               <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
                                   <Button size="icon-sm" variant="ghost" aria-label="Open actions">
-                                    <MoreHorizontal className="h-4 w-4" />
+                                    <MoreVertical className="h-4 w-4" />
                                   </Button>
                                 </DropdownMenuTrigger>
-                                <DropdownMenuContent align="end" className="w-44">
+                                <DropdownMenuContent side="left" align="start" className="w-44">
                                   <DropdownMenuItem onClick={() => setPrDetailRow(row)}>View</DropdownMenuItem>
                                   <DropdownMenuItem onClick={() => { setPrDecisionModal({ row, action: "approve" }); setPrRejectReason(""); }}>Approve</DropdownMenuItem>
                                   <DropdownMenuItem onClick={() => { setPrDecisionModal({ row, action: "reject" }); setPrRejectReason(""); }}>Reject</DropdownMenuItem>
@@ -3680,9 +4297,18 @@ function ProcurementModule({
         <div className="space-y-4">
           <Card>
             <CardContent className="space-y-3 p-0">
-              <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-4 pt-4">
-                <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <div className="flex flex-wrap items-center justify-between gap-3 px-4 pt-4">
+                <h3 className="text-sm font-semibold">RFQs</h3>
+                <Button size="sm" className="h-9 min-w-24 shrink-0" onClick={() => onOpenDrawer("rfq")}>
+                  <Plus className="h-3.5 w-3.5" />
+                  Create
+                </Button>
+              </div>
+              <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-4">
+                <div className="flex min-w-0 items-center gap-2">
                   <Input className="h-9 w-72 shrink-0" placeholder="Search RFQs..." />
+                </div>
+                <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2">
                   <ModuleSourceFilterSelects
                     requestSource={rfqFilters.requestSource}
                     onRequestSourceChange={rfqFilters.setRequestSource}
@@ -3699,10 +4325,6 @@ function ProcurementModule({
                     <option>Awarded</option>
                   </select>
                 </div>
-                <Button size="sm" className="h-9 min-w-24 shrink-0 self-center" onClick={() => onOpenDrawer("rfq")}>
-                  <Plus className="h-3.5 w-3.5" />
-                  Create
-                </Button>
               </div>
 
               <div className="overflow-hidden rounded-md px-4 pb-4">
@@ -3739,10 +4361,10 @@ function ProcurementModule({
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
                               <Button size="icon-sm" variant="ghost" aria-label="Open actions">
-                                <MoreHorizontal className="h-4 w-4" />
+                                <MoreVertical className="h-4 w-4" />
                               </Button>
                             </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className="w-52">
+                            <DropdownMenuContent side="left" align="start" className="w-52">
                               <DropdownMenuItem onClick={() => setActiveRfqId(row.rfq)}>View</DropdownMenuItem>
                               {row.status === "Draft" ? (
                                 <>
@@ -4054,9 +4676,20 @@ function ProcurementModule({
         <div className="space-y-4">
           <Card>
             <CardContent className="space-y-3 text-xs">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <h3 className="text-sm font-semibold">Purchase Orders</h3>
+                {activeRole === "Sourcing Officer" ? (
+                  <Button size="sm" className="h-9 min-w-24 shrink-0" onClick={() => onOpenDrawer("po")}>
+                    <Plus className="h-3.5 w-3.5" />
+                    Create
+                  </Button>
+                ) : null}
+              </div>
               <div className="mb-1 flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
-                <div className="flex min-w-0 flex-wrap items-center gap-2">
+                <div className="flex min-w-0 items-center gap-2">
                   <Input className="h-9 w-72 shrink-0" placeholder="Search purchase order, supplier..." />
+                </div>
+                <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2">
                   <ModuleSourceFilterSelects
                     requestSource={poFilters.requestSource}
                     onRequestSourceChange={poFilters.setRequestSource}
@@ -4076,12 +4709,6 @@ function ProcurementModule({
                     <option value="Rejected">Rejected</option>
                   </select>
                 </div>
-                {activeRole === "Sourcing Officer" ? (
-                  <Button size="sm" className="h-9 min-w-24 shrink-0 self-center" onClick={() => onOpenDrawer("po")}>
-                    <Plus className="h-3.5 w-3.5" />
-                    Create
-                  </Button>
-                ) : null}
               </div>
               <div className="overflow-hidden rounded-md">
                 <table className="w-full border-separate border-spacing-y-2 text-left text-xs">
@@ -4115,10 +4742,10 @@ function ProcurementModule({
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
                               <Button size="icon-sm" variant="ghost" aria-label="Open actions">
-                                <MoreHorizontal className="h-4 w-4" />
+                                <MoreVertical className="h-4 w-4" />
                               </Button>
                             </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className="w-52">
+                            <DropdownMenuContent side="left" align="start" className="w-52">
                               <DropdownMenuItem onClick={() => setApprovalNotice(`Viewing ${row.po} (${row.approval}).`)}>
                                 View
                               </DropdownMenuItem>
@@ -5371,11 +5998,22 @@ function ProcurementModule({
 }
 
 function SourcingModule() {
-  type SourcingModuleTab = "Source" | "Settings";
-  type SourcingSettingsCategorySegment = "supplier" | "manufacturer";
+  type SourcingModuleTab = "Source" | "SPMS" | "Settings";
   type SourcingSettingsCategoryRow = { id: string; name: string; description: string; updatedAt: string };
   type PartnerType = "Supplier" | "Manufacturer" | "Freight Forwarder";
   type SourcingStepId = "basic" | "address" | "contact" | "bank";
+  type SupplierStatus = "Active" | "Inactive";
+  type ItemSupplierRelationshipRow = {
+    id: string;
+    itemName: string;
+    manufacturer: string;
+    category: string;
+    supplier: string;
+    supplierStatus: SupplierStatus;
+    region: string;
+    updatedAt: string;
+    preferred?: boolean;
+  };
   type PartnerRecord = {
     id: string;
     name: string;
@@ -5586,7 +6224,6 @@ function SourcingModule() {
   const [deleteTarget, setDeleteTarget] = useState<PartnerRecord | null>(null);
 
   const [sourcingModuleTab, setSourcingModuleTab] = useState<SourcingModuleTab>("Source");
-  const [sourcingSettingsSegment, setSourcingSettingsSegment] = useState<SourcingSettingsCategorySegment>("supplier");
   const [sourcingSettingsSupplierRows, setSourcingSettingsSupplierRows] = useState<SourcingSettingsCategoryRow[]>(() =>
     supplierCategoryOptions.map((name, i) => ({
       id: `s-sc-${i + 1}`,
@@ -5607,6 +6244,105 @@ function SourcingModule() {
   const [sourcingCreateMfrCatOpen, setSourcingCreateMfrCatOpen] = useState(false);
   const [sourcingNewCatName, setSourcingNewCatName] = useState("");
   const [sourcingNewCatDesc, setSourcingNewCatDesc] = useState("");
+  const [sourcingSupplierCatEditId, setSourcingSupplierCatEditId] = useState<string | null>(null);
+  const [sourcingMfrCatEditId, setSourcingMfrCatEditId] = useState<string | null>(null);
+  const [spmsRelationships] = useState<ItemSupplierRelationshipRow[]>([
+    {
+      id: "spms-1",
+      itemName: "HP ProBook 450 G8",
+      manufacturer: "HP",
+      category: "Laptop",
+      supplier: "ABC Tech",
+      supplierStatus: "Active",
+      region: "East Africa",
+      updatedAt: "2026-04-15",
+      preferred: true,
+    },
+    {
+      id: "spms-2",
+      itemName: "HP ProBook 450 G8",
+      manufacturer: "HP",
+      category: "Laptop",
+      supplier: "XYZ Supplier",
+      supplierStatus: "Inactive",
+      region: "East Africa",
+      updatedAt: "2026-03-30",
+    },
+    {
+      id: "spms-3",
+      itemName: "Cisco Catalyst 9200",
+      manufacturer: "Cisco",
+      category: "Network Hardware",
+      supplier: "Redington",
+      supplierStatus: "Active",
+      region: "Middle East",
+      updatedAt: "2026-04-15",
+      preferred: true,
+    },
+    {
+      id: "spms-4",
+      itemName: "Cisco Catalyst 9200",
+      manufacturer: "Cisco",
+      category: "Network Hardware",
+      supplier: "Nexus Trade",
+      supplierStatus: "Inactive",
+      region: "Europe",
+      updatedAt: "2026-03-22",
+    },
+    {
+      id: "spms-5",
+      itemName: "Dell PowerEdge R550",
+      manufacturer: "Dell",
+      category: "Server",
+      supplier: "Swift Supplies",
+      supplierStatus: "Active",
+      region: "East Africa",
+      updatedAt: "2026-04-18",
+      preferred: true,
+    },
+    {
+      id: "spms-6",
+      itemName: "Dell PowerEdge R550",
+      manufacturer: "Dell",
+      category: "Server",
+      supplier: "Hansei Global",
+      supplierStatus: "Active",
+      region: "Asia Pacific",
+      updatedAt: "2026-04-16",
+    },
+    {
+      id: "spms-7",
+      itemName: "Siemens SIMATIC S7",
+      manufacturer: "Siemens",
+      category: "Automation Controller",
+      supplier: "Atlas Manufacturing",
+      supplierStatus: "Active",
+      region: "East Africa",
+      updatedAt: "2026-04-11",
+      preferred: true,
+    },
+    {
+      id: "spms-8",
+      itemName: "Siemens SIMATIC S7",
+      manufacturer: "Siemens",
+      category: "Automation Controller",
+      supplier: "BlueWave Logistics",
+      supplierStatus: "Inactive",
+      region: "Middle East",
+      updatedAt: "2026-04-09",
+    },
+  ]);
+  const [spmsSearch, setSpmsSearch] = useState("");
+  const [spmsItemFilter, setSpmsItemFilter] = useState("");
+  const [spmsSupplierFilter, setSpmsSupplierFilter] = useState("");
+  const [spmsManufacturerFilter, setSpmsManufacturerFilter] = useState("All");
+  const [spmsCategoryFilter, setSpmsCategoryFilter] = useState("All");
+  const [spmsStatusFilter, setSpmsStatusFilter] = useState<"All" | SupplierStatus>("All");
+  const [spmsOnlyActive, setSpmsOnlyActive] = useState(false);
+  const [spmsExpandAll, setSpmsExpandAll] = useState(true);
+  const [spmsCollapsedItems, setSpmsCollapsedItems] = useState<Record<string, boolean>>({});
+  const [spmsPage, setSpmsPage] = useState(1);
+  const [spmsSelectedItem, setSpmsSelectedItem] = useState<string | null>(null);
 
   const filteredRecords = records.filter((record) => {
     const matchesType = typeFilter === "All" || record.partnerType === typeFilter;
@@ -5617,6 +6353,92 @@ function SourcingModule() {
       record.email.toLowerCase().includes(q);
     return matchesType && matchesSearch;
   });
+
+  const spmsItemOptions = useMemo(
+    () => Array.from(new Set(spmsRelationships.map((r) => r.itemName))).sort(),
+    [spmsRelationships],
+  );
+  const spmsSupplierOptions = useMemo(
+    () => Array.from(new Set(spmsRelationships.map((r) => r.supplier))).sort(),
+    [spmsRelationships],
+  );
+  const spmsManufacturerOptions = useMemo(
+    () => Array.from(new Set(spmsRelationships.map((r) => r.manufacturer))).sort(),
+    [spmsRelationships],
+  );
+  const spmsCategoryOptions = useMemo(
+    () => Array.from(new Set(spmsRelationships.map((r) => r.category))).sort(),
+    [spmsRelationships],
+  );
+  const spmsTypeaheadOptions = useMemo(
+    () => Array.from(new Set([...spmsItemOptions, ...spmsSupplierOptions, ...spmsManufacturerOptions])).sort(),
+    [spmsItemOptions, spmsManufacturerOptions, spmsSupplierOptions],
+  );
+
+  const filteredSpmsRows = useMemo(() => {
+    const q = spmsSearch.trim().toLowerCase();
+    return spmsRelationships.filter((row) => {
+      const matchesSearch =
+        !q ||
+        row.itemName.toLowerCase().includes(q) ||
+        row.manufacturer.toLowerCase().includes(q) ||
+        row.supplier.toLowerCase().includes(q);
+      const matchesItem = !spmsItemFilter || row.itemName === spmsItemFilter;
+      const matchesSupplier = !spmsSupplierFilter || row.supplier === spmsSupplierFilter;
+      const matchesManufacturer = spmsManufacturerFilter === "All" || row.manufacturer === spmsManufacturerFilter;
+      const matchesCategory = spmsCategoryFilter === "All" || row.category === spmsCategoryFilter;
+      const matchesStatus = spmsStatusFilter === "All" || row.supplierStatus === spmsStatusFilter;
+      const matchesActiveOnly = !spmsOnlyActive || row.supplierStatus === "Active";
+      return matchesSearch && matchesItem && matchesSupplier && matchesManufacturer && matchesCategory && matchesStatus && matchesActiveOnly;
+    });
+  }, [spmsCategoryFilter, spmsItemFilter, spmsManufacturerFilter, spmsOnlyActive, spmsRelationships, spmsSearch, spmsStatusFilter, spmsSupplierFilter]);
+
+  const spmsGroupedByItem = useMemo(() => {
+    const itemMap = new Map<string, { itemName: string; manufacturer: string; category: string; suppliers: ItemSupplierRelationshipRow[] }>();
+    for (const row of filteredSpmsRows) {
+      if (!itemMap.has(row.itemName)) {
+        itemMap.set(row.itemName, {
+          itemName: row.itemName,
+          manufacturer: row.manufacturer,
+          category: row.category,
+          suppliers: [],
+        });
+      }
+      const item = itemMap.get(row.itemName)!;
+      if (item.manufacturer === row.manufacturer && item.category === row.category) {
+        item.suppliers.push(row);
+      }
+    }
+    return Array.from(itemMap.values());
+  }, [filteredSpmsRows]);
+
+  const SPMS_GROUPS_PER_PAGE = 5;
+  const spmsTotalPages = Math.max(1, Math.ceil(spmsGroupedByItem.length / SPMS_GROUPS_PER_PAGE));
+  const spmsCurrentPage = Math.min(spmsPage, spmsTotalPages);
+  const spmsVisibleGroups = useMemo(() => {
+    const start = (spmsCurrentPage - 1) * SPMS_GROUPS_PER_PAGE;
+    return spmsGroupedByItem.slice(start, start + SPMS_GROUPS_PER_PAGE);
+  }, [spmsCurrentPage, spmsGroupedByItem]);
+
+  const clearSpmsFilters = () => {
+    setSpmsSearch("");
+    setSpmsItemFilter("");
+    setSpmsSupplierFilter("");
+    setSpmsManufacturerFilter("All");
+    setSpmsCategoryFilter("All");
+    setSpmsStatusFilter("All");
+    setSpmsOnlyActive(false);
+    setSpmsPage(1);
+  };
+
+  const selectedSpmsItem = useMemo(
+    () => (spmsSelectedItem ? spmsGroupedByItem.find((g) => g.itemName === spmsSelectedItem) ?? null : null),
+    [spmsGroupedByItem, spmsSelectedItem],
+  );
+
+  useEffect(() => {
+    setSpmsPage(1);
+  }, [spmsSearch, spmsItemFilter, spmsSupplierFilter, spmsManufacturerFilter, spmsCategoryFilter, spmsStatusFilter, spmsOnlyActive]);
 
   const startCreateFlow = () => {
     setEditingId(null);
@@ -5773,7 +6595,7 @@ function SourcingModule() {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-6">
-        {(["Source", "Settings"] as const).map((item) => (
+        {(["Source", "SPMS", "Settings"] as const).map((item) => (
           <Button
             key={item}
             type="button"
@@ -5803,28 +6625,30 @@ function SourcingModule() {
       <Card>
         <CardContent className="space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex flex-wrap items-center gap-2">
-              <Input
-                className="h-9 w-64"
-                placeholder="Search by name, contact person, email"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-              <select
-                className="h-9 w-44 rounded-md border border-input bg-background px-3 text-xs"
-                value={typeFilter}
-                onChange={(e) => setTypeFilter(e.target.value as "All" | PartnerType)}
-              >
-                <option value="All">All</option>
-                <option value="Supplier">Supplier</option>
-                <option value="Manufacturer">Manufacturer</option>
-                <option value="Freight Forwarder">Freight Forwarder</option>
-              </select>
-            </div>
+            <h3 className="text-sm font-semibold">Partner Directory</h3>
             <Button size="sm" className="h-8 min-w-24" onClick={startCreateFlow}>
               <Plus className="h-3.5 w-3.5" />
               Add
             </Button>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <Input
+              className="h-9 min-w-[220px] flex-1 sm:max-w-md"
+              placeholder="Search by name, contact person, email"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+            <select
+              className="h-9 w-44 shrink-0 rounded-md border border-input bg-background px-3 text-xs"
+              value={typeFilter}
+              onChange={(e) => setTypeFilter(e.target.value as "All" | PartnerType)}
+            >
+              <option value="All">All</option>
+              <option value="Supplier">Supplier</option>
+              <option value="Manufacturer">Manufacturer</option>
+              <option value="Freight Forwarder">Freight Forwarder</option>
+            </select>
           </div>
 
           <div className="overflow-hidden rounded-md">
@@ -5852,10 +6676,7 @@ function SourcingModule() {
                     <td className="px-3 py-2">{record.partnerType}</td>
                     <td className="px-3 py-2">{record.categoryType}</td>
                     <td className="px-3 py-2">
-                      <div className="flex items-center gap-2">
-                        <TableEditIconButton onClick={() => openEdit(record)} aria-label="Edit partner" />
-                        <TableDeleteIconButton onClick={() => setDeleteTarget(record)} aria-label="Delete partner" />
-                      </div>
+                      <TableActionsMenu onEdit={() => openEdit(record)} onDelete={() => setDeleteTarget(record)} />
                     </td>
                   </tr>
                 ))}
@@ -6317,7 +7138,13 @@ function SourcingModule() {
                               onChange={(e) => updateContactPhone(0, e.target.value)}
                             />
                           </div>
-                          <Button type="button" variant="outline" size="sm" className="h-8 min-w-24 shrink-0 sm:ml-0.5" onClick={addContactPhone}>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-8 min-w-24 shrink-0 border-primary !bg-transparent text-primary hover:border-primary hover:!bg-transparent hover:text-primary sm:ml-0.5"
+                            onClick={addContactPhone}
+                          >
                             Add
                           </Button>
                         </div>
@@ -6467,74 +7294,337 @@ function SourcingModule() {
         </>
       )}
 
+      {sourcingModuleTab === "SPMS" && (
+        <div className="space-y-4">
+          <Card>
+            <CardContent className="space-y-3">
+              <div className="flex flex-wrap items-end gap-2">
+                <div className="min-w-[220px] flex-1">
+                  <label className="mb-1 block text-xs font-medium text-foreground">Global Search</label>
+                  <Input
+                    className="h-9"
+                    placeholder="Search supplier, manufacturer, item..."
+                    value={spmsSearch}
+                    onChange={(e) => setSpmsSearch(e.target.value)}
+                    list="spms-typeahead-options"
+                  />
+                  <datalist id="spms-typeahead-options">
+                    {spmsTypeaheadOptions.map((opt) => (
+                      <option key={opt} value={opt} />
+                    ))}
+                  </datalist>
+                </div>
+                <div className="min-w-[200px] flex-1">
+                  <label className="mb-1 block text-xs font-medium text-foreground">Item</label>
+                  <Input
+                    className="h-9"
+                    placeholder="Filter item"
+                    value={spmsItemFilter}
+                    onChange={(e) => setSpmsItemFilter(e.target.value)}
+                    list="spms-item-options"
+                  />
+                  <datalist id="spms-item-options">
+                    {spmsItemOptions.map((opt) => (
+                      <option key={opt} value={opt} />
+                    ))}
+                  </datalist>
+                </div>
+                <div className="min-w-[200px] flex-1">
+                  <label className="mb-1 block text-xs font-medium text-foreground">Supplier</label>
+                  <Input
+                    className="h-9"
+                    placeholder="Filter supplier"
+                    value={spmsSupplierFilter}
+                    onChange={(e) => setSpmsSupplierFilter(e.target.value)}
+                    list="spms-supplier-options"
+                  />
+                  <datalist id="spms-supplier-options">
+                    {spmsSupplierOptions.map((opt) => (
+                      <option key={opt} value={opt} />
+                    ))}
+                  </datalist>
+                </div>
+                <div className="min-w-[180px] flex-1">
+                  <label className="mb-1 block text-xs font-medium text-foreground">Manufacturer</label>
+                  <select
+                    className="h-9 w-full rounded-md border border-input bg-background px-3 text-xs"
+                    value={spmsManufacturerFilter}
+                    onChange={(e) => setSpmsManufacturerFilter(e.target.value)}
+                  >
+                    <option value="All">All Manufacturers</option>
+                    {spmsManufacturerOptions.map((opt) => (
+                      <option key={opt} value={opt}>
+                        {opt}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="min-w-[180px] flex-1">
+                  <label className="mb-1 block text-xs font-medium text-foreground">Category</label>
+                  <select
+                    className="h-9 w-full rounded-md border border-input bg-background px-3 text-xs"
+                    value={spmsCategoryFilter}
+                    onChange={(e) => setSpmsCategoryFilter(e.target.value)}
+                  >
+                    <option value="All">All Categories</option>
+                    {spmsCategoryOptions.map((opt) => (
+                      <option key={opt} value={opt}>
+                        {opt}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="min-w-[160px] flex-1">
+                  <label className="mb-1 block text-xs font-medium text-foreground">Supplier Status</label>
+                  <select
+                    className="h-9 w-full rounded-md border border-input bg-background px-3 text-xs"
+                    value={spmsStatusFilter}
+                    onChange={(e) => setSpmsStatusFilter(e.target.value as "All" | SupplierStatus)}
+                  >
+                    <option value="All">All</option>
+                    <option value="Active">Active</option>
+                    <option value="Inactive">Inactive</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex flex-wrap items-center gap-4 text-xs">
+                  <label className="inline-flex cursor-pointer items-center gap-2">
+                    <input
+                      type="checkbox"
+                      className="accent-primary"
+                      checked={spmsOnlyActive}
+                      onChange={(e) => setSpmsOnlyActive(e.target.checked)}
+                    />
+                    Show Only Active Suppliers
+                  </label>
+                  <label className="inline-flex cursor-pointer items-center gap-2">
+                    <input
+                      type="checkbox"
+                      className="accent-primary"
+                      checked={spmsExpandAll}
+                      onChange={(e) => {
+                        const next = e.target.checked;
+                        setSpmsExpandAll(next);
+                        if (next) setSpmsCollapsedItems({});
+                      }}
+                    />
+                    Expand Grouping
+                  </label>
+                </div>
+                <Button type="button" size="sm" variant="outline" className="h-8" onClick={clearSpmsFilters}>
+                  Clear Filters
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent className="space-y-3 pt-4">
+              {spmsVisibleGroups.length === 0 ? (
+                <div className="rounded-md border border-dashed p-6 text-center">
+                  <p className="text-sm font-medium text-foreground">No relationships found</p>
+                  <p className="mt-1 text-xs text-muted-foreground">Try changing or clearing filters.</p>
+                  <div className="mt-3">
+                    <Button type="button" size="sm" variant="outline" onClick={clearSpmsFilters}>
+                      Clear Filters
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <div className="overflow-hidden rounded-md">
+                    <table className="w-full border-separate border-spacing-y-2 text-left text-xs">
+                      <thead className="bg-muted/60">
+                        <tr>
+                          <th className="px-3 py-2.5 font-medium">Item Name</th>
+                          <th className="px-3 py-2.5 font-medium">Category</th>
+                          <th className="px-3 py-2.5 font-medium">Manufacturer</th>
+                          <th className="px-3 py-2.5 font-medium">Supplier</th>
+                          <th className="px-3 py-2.5 font-medium">Supplier Status</th>
+                          <th className="px-3 py-2.5 font-medium">Region</th>
+                          <th className="px-3 py-2.5 font-medium">Last Updated</th>
+                        </tr>
+                      </thead>
+                      <tbody className="[&>tr:first-child>td]:pt-3">
+                        {spmsVisibleGroups.map((group) => {
+                          return (
+                            <>
+                              {group.suppliers.map((row, idx) => (
+                                <tr
+                                  key={row.id}
+                                  className="cursor-pointer border-y border-border/70 hover:bg-muted/30"
+                                  onClick={() => setSpmsSelectedItem(group.itemName)}
+                                >
+                                  {idx === 0 ? (
+                                    <td className="px-3 py-2 align-middle" rowSpan={group.suppliers.length}>
+                                      {group.itemName}
+                                    </td>
+                                  ) : null}
+                                  {idx === 0 ? (
+                                    <td className="px-3 py-2 align-middle" rowSpan={group.suppliers.length}>
+                                      {group.category}
+                                    </td>
+                                  ) : null}
+                                  {idx === 0 ? (
+                                    <td className="px-3 py-2 align-middle" rowSpan={group.suppliers.length}>
+                                      {group.manufacturer}
+                                    </td>
+                                  ) : null}
+                                  <td className="px-3 py-2">
+                                    <div className="inline-flex items-center gap-2">
+                                      <span>{row.supplier}</span>
+                                      {row.preferred ? (
+                                        <Badge className="bg-emerald-100 text-emerald-700 hover:opacity-100">Preferred</Badge>
+                                      ) : null}
+                                    </div>
+                                  </td>
+                                  <td className="px-3 py-2">
+                                    <Badge
+                                      className={cn(
+                                        "hover:opacity-100",
+                                        row.supplierStatus === "Active"
+                                          ? "bg-emerald-100 text-emerald-700"
+                                          : "bg-slate-200 text-slate-700"
+                                      )}
+                                    >
+                                      {row.supplierStatus}
+                                    </Badge>
+                                  </td>
+                                  <td className="px-3 py-2 text-muted-foreground">{row.region}</td>
+                                  <td className="px-3 py-2 text-muted-foreground">{row.updatedAt}</td>
+                                </tr>
+                              ))}
+                            </>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs text-muted-foreground">
+                      Page {spmsCurrentPage} of {spmsTotalPages}
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-8"
+                        disabled={spmsCurrentPage <= 1}
+                        onClick={() => setSpmsPage((p) => Math.max(1, p - 1))}
+                      >
+                        Previous
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-8"
+                        disabled={spmsCurrentPage >= spmsTotalPages}
+                        onClick={() => setSpmsPage((p) => Math.min(spmsTotalPages, p + 1))}
+                      >
+                        Next
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {selectedSpmsItem ? (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
+              <div className="w-full max-w-3xl rounded-lg border bg-card p-5 shadow-lg">
+                <div className="mb-3 flex items-center justify-between gap-2">
+                  <h3 className="text-sm font-semibold">Item Relationship Mapping · {selectedSpmsItem.itemName}</h3>
+                  <Button variant="ghost" size="icon-sm" onClick={() => setSpmsSelectedItem(null)} aria-label="Close modal">
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+                <div className="space-y-3 text-xs">
+                  <div className="rounded-md border p-3">
+                    <div className="grid gap-2 text-xs sm:grid-cols-2">
+                      <div>
+                        <p className="text-muted-foreground">Item</p>
+                        <p className="font-medium text-foreground">{selectedSpmsItem.itemName}</p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground">Category</p>
+                        <p className="font-medium text-foreground">{selectedSpmsItem.category}</p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground">Manufacturer</p>
+                        <p className="font-medium text-foreground">{selectedSpmsItem.manufacturer}</p>
+                      </div>
+                    </div>
+                    <div className="mt-3 space-y-1.5">
+                      {selectedSpmsItem.suppliers.map((supplier) => (
+                        <div key={`detail-${supplier.id}`} className="flex items-center justify-between gap-3">
+                          <div className="inline-flex items-center gap-2">
+                            <span>{supplier.supplier}</span>
+                            {supplier.preferred ? <Badge className="bg-emerald-100 text-emerald-700 hover:opacity-100">Preferred</Badge> : null}
+                          </div>
+                          <div className="inline-flex items-center gap-2 text-muted-foreground">
+                            <Badge
+                              className={cn(
+                                "hover:opacity-100",
+                                supplier.supplierStatus === "Active" ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-700"
+                              )}
+                            >
+                              {supplier.supplierStatus}
+                            </Badge>
+                            <span>{supplier.region}</span>
+                            <span>{supplier.updatedAt}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      )}
+
       {sourcingModuleTab === "Settings" && (
         <div className="space-y-4">
-          <div
-            className="inline-flex rounded-lg bg-muted/50 p-0.5 text-xs"
-            role="tablist"
-            aria-label="Sourcing settings sections"
-          >
-              <button
-                type="button"
-                role="tab"
-                aria-selected={sourcingSettingsSegment === "supplier"}
-                onClick={() => setSourcingSettingsSegment("supplier")}
-                className={cn(
-                  "rounded-md px-3 py-1.5 font-medium transition-colors",
-                  sourcingSettingsSegment === "supplier"
-                    ? "bg-background text-primary shadow-sm ring-1 ring-border"
-                    : "text-muted-foreground hover:text-foreground"
-                )}
-              >
-                Supplier Categories
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={sourcingSettingsSegment === "manufacturer"}
-                onClick={() => setSourcingSettingsSegment("manufacturer")}
-                className={cn(
-                  "rounded-md px-3 py-1.5 font-medium transition-colors",
-                  sourcingSettingsSegment === "manufacturer"
-                    ? "bg-background text-primary shadow-sm ring-1 ring-border"
-                    : "text-muted-foreground hover:text-foreground"
-                )}
-              >
-                Manufacturer Categories
-              </button>
-          </div>
-
-          {sourcingSettingsSegment === "supplier" && (
-            <Card>
-              <CardContent className="space-y-3 pt-6">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <p className="text-xs text-muted-foreground">Supplier category taxonomy for the Source list and onboarding.</p>
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <Card size="sm">
+              <CardContent className="space-y-4 pt-0">
+                <div className="flex items-center justify-between gap-3">
+                  <h3 className="text-sm font-semibold">Supplier Categories</h3>
                   <Button
                     size="sm"
-                    className="h-8 min-w-24"
+                    className="h-8 w-16 shrink-0"
                     onClick={() => {
+                      setSourcingSupplierCatEditId(null);
                       setSourcingNewCatName("");
                       setSourcingNewCatDesc("");
                       setSourcingCreateSupplierCatOpen(true);
                     }}
                   >
                     <Plus className="h-3.5 w-3.5" />
-                    Create
+                    Add
                   </Button>
                 </div>
-                <div className="overflow-hidden rounded-md">
+                <div className="max-h-80 overflow-auto rounded-md">
                   <table className="w-full border-separate border-spacing-y-0 text-left text-xs">
                     <thead className="bg-muted/60">
                       <tr>
                         <th className="px-3 py-2.5 font-medium">Name</th>
                         <th className="px-3 py-2.5 font-medium">Description</th>
                         <th className="px-3 py-2.5 font-medium">Updated</th>
+                        <th className="px-3 py-2.5 font-medium">Action</th>
                       </tr>
                     </thead>
                     <tbody>
                       {sourcingSettingsSupplierRows.length === 0 ? (
                         <tr>
-                          <td className="px-3 py-4 text-muted-foreground" colSpan={3}>
+                          <td className="px-3 py-4 text-muted-foreground" colSpan={4}>
                             No supplier categories yet. Create one to get started.
                           </td>
                         </tr>
@@ -6544,6 +7634,19 @@ function SourcingModule() {
                             <td className="px-3 py-2 font-medium">{row.name}</td>
                             <td className="px-3 py-2 text-muted-foreground">{row.description || "—"}</td>
                             <td className="px-3 py-2 text-muted-foreground">{row.updatedAt}</td>
+                            <td className="px-3 py-2">
+                              <TableActionsMenu
+                                onEdit={() => {
+                                  setSourcingSupplierCatEditId(row.id);
+                                  setSourcingNewCatName(row.name);
+                                  setSourcingNewCatDesc(row.description);
+                                  setSourcingCreateSupplierCatOpen(true);
+                                }}
+                                onDelete={() => {
+                                  setSourcingSettingsSupplierRows((prev) => prev.filter((r) => r.id !== row.id));
+                                }}
+                              />
+                            </td>
                           </tr>
                         ))
                       )}
@@ -6552,39 +7655,39 @@ function SourcingModule() {
                 </div>
               </CardContent>
             </Card>
-          )}
 
-          {sourcingSettingsSegment === "manufacturer" && (
-            <Card>
-              <CardContent className="space-y-3 pt-6">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <p className="text-xs text-muted-foreground">Manufacturer groupings for RFQ and partner routing.</p>
+            <Card size="sm">
+              <CardContent className="space-y-4 pt-0">
+                <div className="flex items-center justify-between gap-3">
+                  <h3 className="text-sm font-semibold">Manufacturer Categories</h3>
                   <Button
                     size="sm"
-                    className="h-8 min-w-24"
+                    className="h-8 w-16 shrink-0"
                     onClick={() => {
+                      setSourcingMfrCatEditId(null);
                       setSourcingNewCatName("");
                       setSourcingNewCatDesc("");
                       setSourcingCreateMfrCatOpen(true);
                     }}
                   >
                     <Plus className="h-3.5 w-3.5" />
-                    Create
+                    Add
                   </Button>
                 </div>
-                <div className="overflow-hidden rounded-md">
+                <div className="max-h-80 overflow-auto rounded-md">
                   <table className="w-full border-separate border-spacing-y-0 text-left text-xs">
                     <thead className="bg-muted/60">
                       <tr>
                         <th className="px-3 py-2.5 font-medium">Name</th>
                         <th className="px-3 py-2.5 font-medium">Description</th>
                         <th className="px-3 py-2.5 font-medium">Updated</th>
+                        <th className="px-3 py-2.5 font-medium">Action</th>
                       </tr>
                     </thead>
                     <tbody>
                       {sourcingSettingsMfrRows.length === 0 ? (
                         <tr>
-                          <td className="px-3 py-4 text-muted-foreground" colSpan={3}>
+                          <td className="px-3 py-4 text-muted-foreground" colSpan={4}>
                             No manufacturer categories yet. Create one to get started.
                           </td>
                         </tr>
@@ -6594,6 +7697,19 @@ function SourcingModule() {
                             <td className="px-3 py-2 font-medium">{row.name}</td>
                             <td className="px-3 py-2 text-muted-foreground">{row.description || "—"}</td>
                             <td className="px-3 py-2 text-muted-foreground">{row.updatedAt}</td>
+                            <td className="px-3 py-2">
+                              <TableActionsMenu
+                                onEdit={() => {
+                                  setSourcingMfrCatEditId(row.id);
+                                  setSourcingNewCatName(row.name);
+                                  setSourcingNewCatDesc(row.description);
+                                  setSourcingCreateMfrCatOpen(true);
+                                }}
+                                onDelete={() => {
+                                  setSourcingSettingsMfrRows((prev) => prev.filter((r) => r.id !== row.id));
+                                }}
+                              />
+                            </td>
                           </tr>
                         ))
                       )}
@@ -6602,7 +7718,7 @@ function SourcingModule() {
                 </div>
               </CardContent>
             </Card>
-          )}
+          </div>
 
           {sourcingCreateSupplierCatOpen && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="sourcing-sup-cat-title">
@@ -6610,11 +7726,14 @@ function SourcingModule() {
                 type="button"
                 className="absolute inset-0 bg-black/40"
                 aria-label="Close dialog"
-                onClick={() => setSourcingCreateSupplierCatOpen(false)}
+                onClick={() => {
+                  setSourcingSupplierCatEditId(null);
+                  setSourcingCreateSupplierCatOpen(false);
+                }}
               />
               <div className="relative z-10 w-full max-w-md rounded-lg border bg-card p-4 shadow-lg">
                 <h3 id="sourcing-sup-cat-title" className="text-sm font-semibold">
-                  New supplier category
+                  {sourcingSupplierCatEditId ? "Edit supplier category" : "New supplier category"}
                 </h3>
                 <div className="mt-3 space-y-3 text-xs">
                   <div className="space-y-1.5">
@@ -6643,7 +7762,15 @@ function SourcingModule() {
                   </div>
                 </div>
                 <div className="mt-4 flex justify-end gap-2">
-                  <Button type="button" size="sm" variant="outline" onClick={() => setSourcingCreateSupplierCatOpen(false)}>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setSourcingSupplierCatEditId(null);
+                      setSourcingCreateSupplierCatOpen(false);
+                    }}
+                  >
                     Cancel
                   </Button>
                   <Button
@@ -6652,15 +7779,26 @@ function SourcingModule() {
                     onClick={() => {
                       const name = sourcingNewCatName.trim();
                       if (!name) return;
-                      setSourcingSettingsSupplierRows((prev) => [
-                        {
-                          id: `s-sc-${prev.length + 1}`,
-                          name,
-                          description: sourcingNewCatDesc.trim(),
-                          updatedAt: new Date().toISOString().slice(0, 10),
-                        },
-                        ...prev,
-                      ]);
+                      const updatedAt = new Date().toISOString().slice(0, 10);
+                      setSourcingSettingsSupplierRows((prev) => {
+                        if (sourcingSupplierCatEditId) {
+                          return prev.map((r) =>
+                            r.id === sourcingSupplierCatEditId
+                              ? { ...r, name, description: sourcingNewCatDesc.trim(), updatedAt }
+                              : r
+                          );
+                        }
+                        return [
+                          {
+                            id: `s-sc-${prev.length + 1}`,
+                            name,
+                            description: sourcingNewCatDesc.trim(),
+                            updatedAt,
+                          },
+                          ...prev,
+                        ];
+                      });
+                      setSourcingSupplierCatEditId(null);
                       setSourcingCreateSupplierCatOpen(false);
                     }}
                   >
@@ -6677,11 +7815,14 @@ function SourcingModule() {
                 type="button"
                 className="absolute inset-0 bg-black/40"
                 aria-label="Close dialog"
-                onClick={() => setSourcingCreateMfrCatOpen(false)}
+                onClick={() => {
+                  setSourcingMfrCatEditId(null);
+                  setSourcingCreateMfrCatOpen(false);
+                }}
               />
               <div className="relative z-10 w-full max-w-md rounded-lg border bg-card p-4 shadow-lg">
                 <h3 id="sourcing-mfr-cat-title" className="text-sm font-semibold">
-                  New manufacturer category
+                  {sourcingMfrCatEditId ? "Edit manufacturer category" : "New manufacturer category"}
                 </h3>
                 <div className="mt-3 space-y-3 text-xs">
                   <div className="space-y-1.5">
@@ -6710,7 +7851,15 @@ function SourcingModule() {
                   </div>
                 </div>
                 <div className="mt-4 flex justify-end gap-2">
-                  <Button type="button" size="sm" variant="outline" onClick={() => setSourcingCreateMfrCatOpen(false)}>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setSourcingMfrCatEditId(null);
+                      setSourcingCreateMfrCatOpen(false);
+                    }}
+                  >
                     Cancel
                   </Button>
                   <Button
@@ -6719,15 +7868,26 @@ function SourcingModule() {
                     onClick={() => {
                       const name = sourcingNewCatName.trim();
                       if (!name) return;
-                      setSourcingSettingsMfrRows((prev) => [
-                        {
-                          id: `s-mc-${prev.length + 1}`,
-                          name,
-                          description: sourcingNewCatDesc.trim(),
-                          updatedAt: new Date().toISOString().slice(0, 10),
-                        },
-                        ...prev,
-                      ]);
+                      const updatedAt = new Date().toISOString().slice(0, 10);
+                      setSourcingSettingsMfrRows((prev) => {
+                        if (sourcingMfrCatEditId) {
+                          return prev.map((r) =>
+                            r.id === sourcingMfrCatEditId
+                              ? { ...r, name, description: sourcingNewCatDesc.trim(), updatedAt }
+                              : r
+                          );
+                        }
+                        return [
+                          {
+                            id: `s-mc-${prev.length + 1}`,
+                            name,
+                            description: sourcingNewCatDesc.trim(),
+                            updatedAt,
+                          },
+                          ...prev,
+                        ];
+                      });
+                      setSourcingMfrCatEditId(null);
                       setSourcingCreateMfrCatOpen(false);
                     }}
                   >
@@ -7220,14 +8380,14 @@ function BudgetModule() {
                       </td>
                       <td className="py-3">
                         <div className="flex items-center gap-2">
-                          <TableEditIconButton onClick={() => openEdit(b)} aria-label="Edit budget" />
+                          <TableActionsMenu onEdit={() => openEdit(b)} />
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
                               <Button type="button" variant="ghost" size="icon-sm" className="h-8 w-8" aria-label="More budget actions">
-                                <MoreHorizontal className="h-4 w-4" />
+                                <MoreVertical className="h-4 w-4" />
                               </Button>
                             </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className="w-40">
+                            <DropdownMenuContent side="left" align="start" className="w-40">
                               <DropdownMenuItem onClick={() => openView(b)}>View</DropdownMenuItem>
                               <DropdownMenuItem
                                 disabled={b.status === "Closed"}

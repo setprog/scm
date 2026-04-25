@@ -2,8 +2,20 @@
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { AlertTriangle, CircleAlert, MoreVertical, Package, Plus, Search, Settings, Warehouse, X } from "lucide-react";
 import { useCallback, useMemo, useRef, useState } from "react";
@@ -27,6 +39,7 @@ type InvConditionStatus = "Good" | "Damaged" | "Faulty" | "Under Maintenance" | 
 
 type InvStockRow = {
   id: string;
+  itemCode: string;
   itemName: string;
   category: InvItemCategory;
   conditionStatus: InvConditionStatus;
@@ -49,9 +62,11 @@ type InvMovement = {
   toLocationId: string | null;
   date: string;
   reference: string;
+  performedBy: string;
 };
 
 type InvMovementUiKind = "receive" | "issue" | "transfer" | "return";
+type StockActionKind = "in" | "out" | "return" | "transfer";
 type InvRequestMode = "single" | "bulk";
 type ReturnReviewStatus = "Pending" | "Approved" | "Received" | "Rejected";
 type InvRequestRecord = {
@@ -115,9 +130,21 @@ function invStockStatus(available: number, minLevel: number): "Out of Stock" | "
   return "In Stock";
 }
 
+function movementActivityType(movement: InvMovement): "Stock In" | "Stock Out" | "Transfer" | "Return" {
+  if (movement.type === "In") return "Stock In";
+  if (movement.type === "Out") return "Stock Out";
+  if (movement.type === "Transfer") return "Transfer";
+  return "Return";
+}
+
 function nextMovementId(movements: InvMovement[]) {
   const n = movements.length + 1;
   return `MOV-${String(n).padStart(4, "0")}`;
+}
+
+function nextItemCode(stockRows: InvStockRow[]) {
+  const next = stockRows.length + 1;
+  return `ITM-${String(next).padStart(4, "0")}`;
 }
 
 function invLocName(locations: InvLocation[], id: string | null) {
@@ -155,6 +182,7 @@ function InventoryTabs({
       <div className="flex flex-wrap gap-8">
         {items.map((item) => {
           const active = tab === item;
+          const label = item === "Transaction" ? "Stock Activity" : item;
           return (
             <button
               key={item}
@@ -166,7 +194,7 @@ function InventoryTabs({
               )}
               style={active ? { color: PRIMARY, borderBottomColor: PRIMARY } : undefined}
             >
-              {item}
+              {label}
             </button>
           );
         })}
@@ -208,6 +236,7 @@ export function InventoryModule() {
   const [stockRows, setStockRows] = useState<InvStockRow[]>(() => [
     {
       id: "stk-1",
+      itemCode: "ITM-0001",
       itemName: "Cast Iron Valve 4\"",
       category: "Stock Item",
       conditionStatus: "Good",
@@ -219,6 +248,7 @@ export function InventoryModule() {
     },
     {
       id: "stk-2",
+      itemCode: "ITM-0002",
       itemName: "Stainless Bolts M16",
       category: "Consumable Item",
       conditionStatus: "Good",
@@ -230,6 +260,7 @@ export function InventoryModule() {
     },
     {
       id: "stk-3",
+      itemCode: "ITM-0003",
       itemName: "Electrical Cable 3×2.5",
       category: "Stock Item",
       conditionStatus: "Good",
@@ -241,6 +272,7 @@ export function InventoryModule() {
     },
     {
       id: "stk-4",
+      itemCode: "ITM-0004",
       itemName: "Hydraulic Hose Assembly",
       category: "Asset Item",
       conditionStatus: "Under Maintenance",
@@ -263,6 +295,7 @@ export function InventoryModule() {
       toLocationId: "loc-4",
       date: "2026-04-10",
       reference: "PO-991",
+      performedBy: "Storekeeper",
     },
     {
       id: "MOV-0002",
@@ -274,6 +307,7 @@ export function InventoryModule() {
       toLocationId: null,
       date: "2026-04-12",
       reference: "WO-442",
+      performedBy: "Storekeeper",
     },
     {
       id: "MOV-0003",
@@ -285,6 +319,7 @@ export function InventoryModule() {
       toLocationId: "loc-3",
       date: "2026-04-14",
       reference: "TRF-108",
+      performedBy: "Storekeeper",
     },
     {
       id: "MOV-0004",
@@ -296,6 +331,7 @@ export function InventoryModule() {
       toLocationId: null,
       date: "2026-04-15",
       reference: "WO-451",
+      performedBy: "Storekeeper",
     },
     {
       id: "MOV-0005",
@@ -307,6 +343,7 @@ export function InventoryModule() {
       toLocationId: "loc-2",
       date: "2026-04-16",
       reference: "RMA-2201",
+      performedBy: "Storekeeper",
     },
     {
       id: "MOV-0006",
@@ -318,11 +355,28 @@ export function InventoryModule() {
       toLocationId: "loc-2",
       date: "2026-04-16",
       reference: "PO-1002",
+      performedBy: "Storekeeper",
     },
   ]);
 
   const [movementModalOpen, setMovementModalOpen] = useState(false);
   const [addItemModalOpen, setAddItemModalOpen] = useState(false);
+  const [stockActionSelectionOpen, setStockActionSelectionOpen] = useState(false);
+  const [selectedStockAction, setSelectedStockAction] = useState<StockActionKind>("in");
+  const [stockActionModal, setStockActionModal] = useState<StockActionKind | null>(null);
+  const [stockActionError, setStockActionError] = useState<string | null>(null);
+  const [stockActionForm, setStockActionForm] = useState({
+    itemName: "",
+    quantity: "",
+    source: "Supplier",
+    destination: "Department",
+    returnSource: "Department",
+    locationId: "",
+    fromLocationId: "",
+    toLocationId: "",
+    note: "",
+    returnReason: "",
+  });
   const [movementForm, setMovementForm] = useState<{
     kind: InvMovementUiKind;
     itemName: string;
@@ -375,6 +429,7 @@ export function InventoryModule() {
     departmentKey: "",
   });
   const [addItemError, setAddItemError] = useState("");
+  const [addItemStep, setAddItemStep] = useState<1 | 2 | 3>(1);
 
   const [stockSearch, setStockSearch] = useState("");
   const [stockCategoryFilter, setStockCategoryFilter] = useState<string>("All");
@@ -457,6 +512,216 @@ export function InventoryModule() {
     setMovementModalOpen(true);
   }, [itemOptions, locations, stockRows, todayStr]);
 
+  const openStockActionModal = useCallback(
+    (kind: StockActionKind) => {
+      const firstItem = itemOptions[0] ?? "";
+      const loc0 = locations[0]?.id ?? "";
+      const loc1 = locations[1]?.id ?? loc0;
+      setStockActionForm({
+        itemName: firstItem,
+        quantity: "",
+        source: "Supplier",
+        destination: "Department",
+        returnSource: "Department",
+        locationId: loc0,
+        fromLocationId: loc0,
+        toLocationId: loc1,
+        note: "",
+        returnReason: "",
+      });
+      setStockActionError(null);
+      setStockActionModal(kind);
+    },
+    [itemOptions, locations, todayStr],
+  );
+
+  const submitStockAction = useCallback(() => {
+    if (!stockActionModal) return;
+    setStockActionError(null);
+    const qty = Number(stockActionForm.quantity);
+    if (!stockActionForm.itemName || !Number.isFinite(qty) || qty <= 0) {
+      setStockActionError("Please select an item and enter a quantity greater than 0.");
+      return;
+    }
+
+    if (stockActionModal === "in") {
+      if (!stockActionForm.locationId) {
+        setStockActionError("Please select a warehouse / location.");
+        return;
+      }
+      setStockRows((prev) => {
+        const idx = prev.findIndex((r) => r.itemName === stockActionForm.itemName && r.locationId === stockActionForm.locationId);
+        if (idx >= 0) {
+          return prev.map((r, i) => (i === idx ? { ...r, available: r.available + qty } : r));
+        }
+        const template = prev.find((r) => r.itemName === stockActionForm.itemName);
+        return [
+          ...prev,
+          {
+            id: typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `stk-${Date.now()}`,
+            itemCode: nextItemCode(prev),
+            itemName: stockActionForm.itemName,
+            category: template?.category ?? "Stock Item",
+            conditionStatus: template?.conditionStatus ?? "Good",
+            available: qty,
+            reserved: 0,
+            uom: template?.uom ?? "pcs",
+            locationId: stockActionForm.locationId,
+            minLevel: template?.minLevel ?? INV_DEFAULT_MIN,
+          },
+        ];
+      });
+      setMovements((prev) => [
+        ...prev,
+        {
+          id: nextMovementId(prev),
+          itemName: stockActionForm.itemName,
+          type: "In",
+          transactionType: "Stock In",
+          quantity: qty,
+          fromLocationId: null,
+          toLocationId: stockActionForm.locationId,
+          date: todayStr,
+          reference: stockActionForm.note.trim() || stockActionForm.source,
+          performedBy: "Storekeeper",
+        },
+      ]);
+    }
+
+    if (stockActionModal === "out") {
+      if (!stockActionForm.locationId) {
+        setStockActionError("Please select a warehouse / location.");
+        return;
+      }
+      const row = stockRows.find((r) => r.itemName === stockActionForm.itemName && r.locationId === stockActionForm.locationId);
+      if (!row || row.available < qty) {
+        setStockActionError("Insufficient stock in the selected warehouse / location.");
+        return;
+      }
+      setStockRows((prev) => {
+        const idx = prev.findIndex((r) => r.itemName === stockActionForm.itemName && r.locationId === stockActionForm.locationId);
+        return prev.map((r, i) => (i === idx ? { ...r, available: r.available - qty } : r));
+      });
+      setMovements((prev) => [
+        ...prev,
+        {
+          id: nextMovementId(prev),
+          itemName: stockActionForm.itemName,
+          type: "Out",
+          transactionType: "Stock Out",
+          quantity: qty,
+          fromLocationId: stockActionForm.locationId,
+          toLocationId: null,
+          date: todayStr,
+          reference: stockActionForm.note.trim() || stockActionForm.destination,
+          performedBy: "Storekeeper",
+        },
+      ]);
+    }
+
+    if (stockActionModal === "return") {
+      if (!stockActionForm.locationId) {
+        setStockActionError("Please select a warehouse / location.");
+        return;
+      }
+      setStockRows((prev) => {
+        const idx = prev.findIndex((r) => r.itemName === stockActionForm.itemName && r.locationId === stockActionForm.locationId);
+        if (idx >= 0) {
+          return prev.map((r, i) => (i === idx ? { ...r, available: r.available + qty } : r));
+        }
+        const template = prev.find((r) => r.itemName === stockActionForm.itemName);
+        return [
+          ...prev,
+          {
+            id: typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `stk-${Date.now()}`,
+            itemCode: nextItemCode(prev),
+            itemName: stockActionForm.itemName,
+            category: template?.category ?? "Stock Item",
+            conditionStatus: template?.conditionStatus ?? "Good",
+            available: qty,
+            reserved: 0,
+            uom: template?.uom ?? "pcs",
+            locationId: stockActionForm.locationId,
+            minLevel: template?.minLevel ?? INV_DEFAULT_MIN,
+          },
+        ];
+      });
+      setMovements((prev) => [
+        ...prev,
+        {
+          id: nextMovementId(prev),
+          itemName: stockActionForm.itemName,
+          type: "Return",
+          transactionType: "Return",
+          quantity: qty,
+          fromLocationId: null,
+          toLocationId: stockActionForm.locationId,
+          date: todayStr,
+          reference: stockActionForm.returnReason.trim() || stockActionForm.returnSource,
+          performedBy: "Storekeeper",
+        },
+      ]);
+    }
+
+    if (stockActionModal === "transfer") {
+      if (!stockActionForm.fromLocationId || !stockActionForm.toLocationId) {
+        setStockActionError("Please select both source and destination warehouses.");
+        return;
+      }
+      if (stockActionForm.fromLocationId === stockActionForm.toLocationId) {
+        setStockActionError("From Warehouse and To Warehouse must be different.");
+        return;
+      }
+      const src = stockRows.find((r) => r.itemName === stockActionForm.itemName && r.locationId === stockActionForm.fromLocationId);
+      if (!src || src.available < qty) {
+        setStockActionError("Quantity exceeds available stock in the source warehouse.");
+        return;
+      }
+      setStockRows((prev) => {
+        const srcIdx = prev.findIndex((r) => r.itemName === stockActionForm.itemName && r.locationId === stockActionForm.fromLocationId);
+        let next = prev.map((r, i) => (i === srcIdx ? { ...r, available: r.available - qty } : r));
+        const destIdx = next.findIndex((r) => r.itemName === stockActionForm.itemName && r.locationId === stockActionForm.toLocationId);
+        if (destIdx >= 0) {
+          next = next.map((r, i) => (i === destIdx ? { ...r, available: r.available + qty } : r));
+        } else {
+          next = [
+            ...next,
+            {
+              id: typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `stk-${Date.now()}`,
+              itemCode: nextItemCode(next),
+              itemName: stockActionForm.itemName,
+              category: src.category,
+              conditionStatus: src.conditionStatus,
+              available: qty,
+              reserved: 0,
+              uom: src.uom,
+              locationId: stockActionForm.toLocationId,
+              minLevel: src.minLevel,
+            },
+          ];
+        }
+        return next;
+      });
+      setMovements((prev) => [
+        ...prev,
+        {
+          id: nextMovementId(prev),
+          itemName: stockActionForm.itemName,
+          type: "Transfer",
+          transactionType: "Transfer",
+          quantity: qty,
+          fromLocationId: stockActionForm.fromLocationId,
+          toLocationId: stockActionForm.toLocationId,
+          date: todayStr,
+          reference: stockActionForm.note.trim() || "Manual",
+          performedBy: "Storekeeper",
+        },
+      ]);
+    }
+
+    setStockActionModal(null);
+  }, [stockActionModal, stockActionForm, stockRows, todayStr]);
+
   const openAddItemModal = useCallback(() => {
     setAddItemForm({
       category: "Stock Item",
@@ -482,6 +747,7 @@ export function InventoryModule() {
       departmentKey: "",
     });
     setAddItemError("");
+    setAddItemStep(1);
     setAddItemModalOpen(true);
   }, [locations]);
 
@@ -526,17 +792,43 @@ export function InventoryModule() {
 
   const allFilteredSelected = filteredStock.length > 0 && filteredStock.every((row) => selectedStockIds.includes(row.id));
 
-  const filteredMovements = useMemo(() => {
-    return movements.filter((m) => {
-      if (movTypeFilter !== "All" && m.type !== movTypeFilter) return false;
-      if (movItemFilter && m.itemName !== movItemFilter) return false;
+  const stockActivityRows = useMemo(() => {
+    const movementRows = movements.map((m) => ({
+      id: m.id,
+      date: m.date,
+      itemName: m.itemName,
+      activityType: movementActivityType(m),
+      quantity: m.quantity,
+      source: invLocName(locations, m.fromLocationId),
+      destination: invLocName(locations, m.toLocationId),
+      reference: m.reference,
+      performedBy: m.performedBy,
+    }));
+    const allocationRows = requestRecords.map((r) => ({
+      id: `ALLOC-${r.id}`,
+      date: r.deliveredAt ?? r.reviewedAt ?? r.requestedAt,
+      itemName: r.itemName,
+      activityType: "Allocation",
+      quantity: r.quantity,
+      source: "Warehouse",
+      destination: INV_DEPT_OPTIONS.find((d) => d.value === r.departmentKey)?.label ?? "Department",
+      reference: "Manual",
+      performedBy: "Storekeeper",
+    }));
+    return [...movementRows, ...allocationRows];
+  }, [locations, movements, requestRecords]);
+
+  const filteredStockActivity = useMemo(() => {
+    return stockActivityRows.filter((row) => {
+      if (movTypeFilter !== "All" && row.activityType !== movTypeFilter) return false;
+      if (movItemFilter && row.itemName !== movItemFilter) return false;
       const q = movSearch.trim().toLowerCase();
-      if (q && !m.itemName.toLowerCase().includes(q) && !m.reference.toLowerCase().includes(q)) return false;
-      if (movDateFrom && m.date < movDateFrom) return false;
-      if (movDateTo && m.date > movDateTo) return false;
+      if (q && !row.itemName.toLowerCase().includes(q)) return false;
+      if (movDateFrom && row.date < movDateFrom) return false;
+      if (movDateTo && row.date > movDateTo) return false;
       return true;
     });
-  }, [movements, movSearch, movTypeFilter, movDateFrom, movDateTo, movItemFilter]);
+  }, [movDateFrom, movDateTo, movItemFilter, movSearch, movTypeFilter, stockActivityRows]);
 
   const requestSelectableItems = useMemo(() => {
     return [...stockRows]
@@ -571,6 +863,7 @@ export function InventoryModule() {
       ...prev,
       {
         id,
+        itemCode: nextItemCode(prev),
         itemName: addItemForm.name.trim(),
         category: addItemForm.category,
         conditionStatus: addItemForm.conditionStatus,
@@ -832,9 +1125,10 @@ export function InventoryModule() {
         setStockNotice(`Cannot confirm receipt for ${movement.id} because destination location is missing.`);
         return;
       }
+      const destinationId = movement.toLocationId;
 
       setStockRows((prev) => {
-        const idx = prev.findIndex((r) => r.itemName === movement.itemName && r.locationId === movement.toLocationId);
+        const idx = prev.findIndex((r) => r.itemName === movement.itemName && r.locationId === destinationId);
         if (idx >= 0) {
           return prev.map((r, i) => (i === idx ? { ...r, available: r.available + movement.quantity } : r));
         }
@@ -843,13 +1137,14 @@ export function InventoryModule() {
           ...prev,
           {
             id: typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `stk-${Date.now()}`,
+            itemCode: nextItemCode(prev),
             itemName: movement.itemName,
             category: template?.category ?? "Stock Item",
             conditionStatus: template?.conditionStatus ?? "Good",
             available: movement.quantity,
             reserved: 0,
             uom: template?.uom ?? "pcs",
-            locationId: movement.toLocationId,
+            locationId: destinationId,
             minLevel: template?.minLevel ?? INV_DEFAULT_MIN,
           },
         ];
@@ -1029,7 +1324,18 @@ export function InventoryModule() {
           typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `stk-${String(prev.length)}`;
         return [
           ...prev,
-          { id, itemName, category: cat, conditionStatus: template?.conditionStatus ?? "Good", available: qty, reserved: 0, uom: u, locationId, minLevel },
+          {
+            id,
+            itemCode: nextItemCode(prev),
+            itemName,
+            category: cat,
+            conditionStatus: template?.conditionStatus ?? "Good",
+            available: qty,
+            reserved: 0,
+            uom: u,
+            locationId,
+            minLevel,
+          },
         ];
       });
       setMovements((prev) => [
@@ -1044,6 +1350,7 @@ export function InventoryModule() {
           toLocationId: locationId,
           date,
           reference: reference.trim() || "—",
+          performedBy: "Storekeeper",
         },
       ]);
     };
@@ -1073,6 +1380,7 @@ export function InventoryModule() {
             ...next,
             {
               id,
+              itemCode: nextItemCode(next),
               itemName,
               category: src.category,
               conditionStatus: src.conditionStatus,
@@ -1098,6 +1406,7 @@ export function InventoryModule() {
           toLocationId,
           date,
           reference: reference.trim() || "Transfer",
+          performedBy: "Storekeeper",
         },
       ]);
       return true;
@@ -1124,6 +1433,7 @@ export function InventoryModule() {
           toLocationId: locationId,
           date,
           reference: reference.trim() || "—",
+          performedBy: "Storekeeper",
         },
       ]);
       setStockNotice(`Return request logged for ${itemName}. Approve it in Returned tab to add stock.`);
@@ -1154,6 +1464,7 @@ export function InventoryModule() {
           toLocationId: null,
           date,
           reference: reference.trim() || "—",
+          performedBy: "Storekeeper",
         },
       ]);
     } else {
@@ -1267,144 +1578,97 @@ export function InventoryModule() {
           {stockNotice ? (
             <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-900">{stockNotice}</p>
           ) : null}
-          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
-            <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <div className="relative w-72 max-w-full shrink-0">
-                <Search className="pointer-events-none absolute top-2.5 left-3 h-4 w-4 text-muted-foreground" />
-                <Input
-                  className="h-9 pl-9 text-xs"
-                  placeholder="Search by item name"
-                  value={stockSearch}
-                  onChange={(e) => setStockSearch(e.target.value)}
-                />
+          <div className="rounded-lg border bg-card">
+            <div className="space-y-3 border-b px-4 py-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="text-sm font-semibold text-foreground">Stock Management</h3>
+                <div className="flex shrink-0 flex-wrap items-center gap-2">
+                  <Button type="button" variant="outline" size="sm" className="h-9" onClick={openAddItemModal}>
+                    Add New Item
+                  </Button>
+                  <Button type="button" size="sm" className="h-9" onClick={() => setStockActionSelectionOpen(true)}>
+                    Manage Stock
+                  </Button>
+                </div>
               </div>
-              <select
-                className={filterSelect}
-                value={stockCategoryFilter}
-                onChange={(e) => setStockCategoryFilter(e.target.value)}
-              >
-                <option value="All">All categories</option>
-                <option value="Stock Item">Stock Item</option>
-                <option value="Consumable Item">Consumable Item</option>
-                <option value="Service Item">Service Item</option>
-                <option value="Asset Item">Asset Item</option>
-              </select>
-              <select
-                className={filterSelect}
-                value={stockStatusFilter}
-                onChange={(e) => setStockStatusFilter(e.target.value)}
-              >
-                <option value="All">All statuses</option>
-                <option value="In Stock">In Stock</option>
-                <option value="Low Stock">Low Stock</option>
-                <option value="Out of Stock">Out of Stock</option>
-              </select>
-              <select className={filterSelect} value={stockLocFilter} onChange={(e) => setStockLocFilter(e.target.value)}>
-                <option value="">All locations</option>
-                {locations.map((l) => (
-                  <option key={l.id} value={l.id}>
-                    {l.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
-              <Button
-                type="button"
-                size="sm"
-                className="h-9 min-w-[7.5rem] text-white hover:opacity-90"
-                style={{ backgroundColor: PRIMARY }}
-                onClick={openAddItemModal}
-              >
-                <Plus className="mr-1 h-3.5 w-3.5" />
-                Add item
-              </Button>
-            </div>
-          </div>
-
-          {selectedStockIds.length > 0 ? (
-            <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs">
-              <p className="text-muted-foreground">
-                {selectedStockIds.length} selected (items/tools) for batch operations
-              </p>
-              <div className="flex flex-wrap gap-2">
-                <Button type="button" size="sm" variant="outline" className="h-8" onClick={() => openRequestModal(selectedStockIds, "bulk")}>
-                  Bulk request
-                </Button>
-                <Button type="button" size="sm" variant="outline" className="h-8" onClick={() => editStockRows(selectedStockIds)}>
-                  Bulk edit
-                </Button>
-                <Button type="button" size="sm" variant="destructive" className="h-8" onClick={() => deleteStockRows(selectedStockIds)}>
-                  Bulk delete
-                </Button>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="relative w-72 max-w-full shrink-0">
+                  <Search className="pointer-events-none absolute top-2.5 left-3 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    className="h-9 pl-9 text-xs"
+                    placeholder="Search by item name"
+                    value={stockSearch}
+                    onChange={(e) => setStockSearch(e.target.value)}
+                  />
+                </div>
+                <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2">
+                  <select
+                    className={cn(filterSelect, "bg-transparent")}
+                    value={stockCategoryFilter}
+                    onChange={(e) => setStockCategoryFilter(e.target.value)}
+                  >
+                    <option value="All">All categories</option>
+                    <option value="Stock Item">Stock Item</option>
+                    <option value="Consumable Item">Consumable Item</option>
+                    <option value="Service Item">Service Item</option>
+                    <option value="Asset Item">Asset Item</option>
+                  </select>
+                  <select
+                    className={cn(filterSelect, "bg-transparent")}
+                    value={stockStatusFilter}
+                    onChange={(e) => setStockStatusFilter(e.target.value)}
+                  >
+                    <option value="All">All statuses</option>
+                    <option value="In Stock">In Stock</option>
+                    <option value="Low Stock">Low Stock</option>
+                    <option value="Out of Stock">Out of Stock</option>
+                  </select>
+                  <select className={cn(filterSelect, "bg-transparent")} value={stockLocFilter} onChange={(e) => setStockLocFilter(e.target.value)}>
+                    <option value="">All locations</option>
+                    {locations.map((l) => (
+                      <option key={l.id} value={l.id}>
+                        {l.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
             </div>
-          ) : null}
-
-          <div className="overflow-x-auto rounded-lg bg-card shadow-sm ring-1 ring-slate-100/80">
-            <table className="w-full min-w-[980px] text-left text-xs">
-              <thead>
-                <tr className="text-muted-foreground">
-                  <th className="px-4 py-3 font-medium">
-                    <input type="checkbox" checked={allFilteredSelected} onChange={toggleAllFilteredSelection} aria-label="Select all listed items" />
-                  </th>
-                  <th className="px-4 py-3 font-medium">Name</th>
-                  <th className="px-4 py-3 font-medium">Category</th>
-                  <th className="px-4 py-3 font-medium">Available Quantity</th>
-                  <th className="px-4 py-3 font-medium">Reserved Quantity</th>
-                  <th className="px-4 py-3 font-medium">Unit of Measurement</th>
-                  <th className="px-4 py-3 font-medium">Location</th>
-                  <th className="px-4 py-3 font-medium">Minimum Level</th>
-                  <th className="px-4 py-3 font-medium">Availability status</th>
-                  <th className="px-4 py-3 font-medium">Condition status</th>
-                  <th className="px-4 py-3 font-medium">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredStock.map((row) => {
-                  const st = invStockStatus(row.available, row.minLevel);
-                  const selected = selectedStockIds.includes(row.id);
-                  return (
-                    <tr key={row.id} className="border-t border-border/60">
-                      <td className="px-4 py-3">
-                        <input
-                          type="checkbox"
-                          checked={selected}
-                          onChange={() => toggleStockSelection(row.id)}
-                          aria-label={`Select ${row.itemName}`}
-                        />
-                      </td>
-                      <td className="px-4 py-3 font-medium text-foreground">{row.itemName}</td>
-                      <td className="px-4 py-3 text-muted-foreground">{row.category}</td>
-                      <td className="px-4 py-3 tabular-nums">{row.available}</td>
-                      <td className="px-4 py-3 tabular-nums">{row.reserved}</td>
-                      <td className="px-4 py-3">{row.uom}</td>
-                      <td className="px-4 py-3 text-muted-foreground">{invLocName(locations, row.locationId)}</td>
-                      <td className="px-4 py-3 tabular-nums">{row.minLevel}</td>
-                      <td className="px-4 py-3">
-                        <InvStatusBadge value={st} />
-                      </td>
-                      <td className="px-4 py-3">{row.conditionStatus}</td>
-                      <td className="px-4 py-3">
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button type="button" variant="ghost" size="icon-sm" className="h-8 w-8" aria-label="More stock actions">
-                              <MoreVertical className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end" className="w-40">
-                            <DropdownMenuItem onClick={exportStockTemplate}>Import Template</DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => openRequestModal([row.id], "single")}>Request</DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => editStockRows([row.id])}>Edit</DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => deleteStockRows([row.id])}>Delete</DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+            <div className="overflow-hidden rounded-md px-4 py-3">
+              <table className="w-full border-separate border-spacing-y-2 text-left text-xs">
+                <thead>
+                  <tr className="text-muted-foreground">
+                    <th className="px-3 py-2 font-medium">Item Name</th>
+                    <th className="px-3 py-2 font-medium">Item Code</th>
+                    <th className="px-3 py-2 font-medium">Category</th>
+                    <th className="px-3 py-2 font-medium">Warehouse / Location</th>
+                    <th className="px-3 py-2 font-medium">Available Quantity</th>
+                    <th className="px-3 py-2 font-medium">Reserved Quantity</th>
+                    <th className="px-3 py-2 font-medium">Total Quantity</th>
+                    <th className="px-3 py-2 font-medium">Availability Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredStock.map((row) => {
+                    const st = invStockStatus(row.available, row.minLevel);
+                    return (
+                      <tr key={row.id} className="rounded-md bg-muted/30">
+                        <td className="px-3 py-2 font-medium text-foreground">{row.itemName}</td>
+                        <td className="px-3 py-2">{row.itemCode}</td>
+                        <td className="px-3 py-2">{row.category}</td>
+                        <td className="px-3 py-2">{invLocName(locations, row.locationId)}</td>
+                        <td className="px-3 py-2 tabular-nums">{row.available}</td>
+                        <td className="px-3 py-2 tabular-nums">{row.reserved}</td>
+                        <td className="px-3 py-2 tabular-nums">{row.available + row.reserved}</td>
+                        <td className="px-3 py-2">
+                          <InvStatusBadge value={st} />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       )}
@@ -1413,120 +1677,71 @@ export function InventoryModule() {
         <div className="space-y-6">
           <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
             <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <select className={filterSelect} value={movTypeFilter} onChange={(e) => setMovTypeFilter(e.target.value)}>
-              <option value="All">All transaction types</option>
-              <option value="In">In</option>
-              <option value="Out">Out</option>
-              <option value="Transfer">Transfer</option>
-              <option value="Return">Return</option>
-            </select>
+            <Select value={movTypeFilter} onValueChange={setMovTypeFilter}>
+              <SelectTrigger className="h-9 w-[180px] text-xs">
+                <SelectValue placeholder="Activity Type" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  <SelectItem value="All">All activity types</SelectItem>
+                  <SelectItem value="Stock In">Stock In</SelectItem>
+                  <SelectItem value="Stock Out">Stock Out</SelectItem>
+                  <SelectItem value="Transfer">Transfer</SelectItem>
+                  <SelectItem value="Return">Return</SelectItem>
+                  <SelectItem value="Allocation">Allocation</SelectItem>
+                </SelectGroup>
+              </SelectContent>
+            </Select>
             <Input className="h-9 w-36 shrink-0 text-xs" type="date" value={movDateFrom} onChange={(e) => setMovDateFrom(e.target.value)} />
             <span className="text-xs text-muted-foreground">to</span>
             <Input className="h-9 w-36 shrink-0 text-xs" type="date" value={movDateTo} onChange={(e) => setMovDateTo(e.target.value)} />
-            <select className={cn(filterSelect, "sm:w-56")} value={movItemFilter} onChange={(e) => setMovItemFilter(e.target.value)}>
-              <option value="">All items</option>
-              {itemOptions.map((n) => (
-                <option key={n} value={n}>
-                  {n}
-                </option>
-              ))}
-            </select>
             <div className="relative min-w-[12rem] flex-1 sm:max-w-xs">
               <Search className="pointer-events-none absolute top-2.5 left-3 h-4 w-4 text-muted-foreground" />
               <Input
                 className="h-9 pl-9 text-xs"
-                placeholder="Search reference…"
+                placeholder="Search item name"
                 value={movSearch}
                 onChange={(e) => setMovSearch(e.target.value)}
               />
             </div>
             </div>
-            <div className="flex shrink-0 flex-wrap items-center gap-2">
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button type="button" variant="outline" size="sm" className="h-9">
-                    New transaction
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-48">
-                  <DropdownMenuItem onClick={() => openMovementModal("receive")}>Inbound</DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => openMovementModal("issue")}>Outbound</DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => openMovementModal("transfer")}>Internal (movement)</DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
           </div>
 
-          <div className="overflow-x-auto rounded-lg bg-card shadow-sm ring-1 ring-slate-100/80">
-            <div className="space-y-3 px-4 pt-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <h3 className="text-sm font-semibold text-foreground">Movements</h3>
-                <Button type="button" variant="outline" size="sm" className="h-9" onClick={openMovementModal}>
-                  New movement
-                </Button>
-              </div>
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="relative w-72 max-w-full shrink-0">
-                  <Search className="pointer-events-none absolute top-2.5 left-3 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    className="h-9 pl-9 text-xs"
-                    placeholder="Search reference…"
-                    value={movSearch}
-                    onChange={(e) => setMovSearch(e.target.value)}
-                  />
-                </div>
-                <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2">
-                  <select className={filterSelect} value={movTypeFilter} onChange={(e) => setMovTypeFilter(e.target.value)}>
-                    <option value="All">All movement types</option>
-                    <option value="In">In</option>
-                    <option value="Out">Out</option>
-                    <option value="Transfer">Transfer</option>
-                    <option value="Return">Return</option>
-                  </select>
-                  <Input className="h-9 w-36 shrink-0 text-xs" type="date" value={movDateFrom} onChange={(e) => setMovDateFrom(e.target.value)} />
-                  <span className="text-xs text-muted-foreground">to</span>
-                  <Input className="h-9 w-36 shrink-0 text-xs" type="date" value={movDateTo} onChange={(e) => setMovDateTo(e.target.value)} />
-                  <select className={cn(filterSelect, "sm:w-56")} value={movItemFilter} onChange={(e) => setMovItemFilter(e.target.value)}>
-                    <option value="">All items</option>
-                    {itemOptions.map((n) => (
-                      <option key={n} value={n}>
-                        {n}
-                      </option>
+          <div className="rounded-lg border bg-card">
+            <div className="overflow-hidden rounded-md px-4 py-3">
+              <table className="w-full border-separate border-spacing-y-2 text-left text-xs">
+                <thead>
+                  <tr className="text-muted-foreground">
+                    <th className="px-3 py-2 font-medium">Date</th>
+                    <th className="px-3 py-2 font-medium">Item Name</th>
+                    <th className="px-3 py-2 font-medium">Activity Type</th>
+                    <th className="px-3 py-2 font-medium">Quantity</th>
+                    <th className="px-3 py-2 font-medium">Source</th>
+                    <th className="px-3 py-2 font-medium">Destination</th>
+                    <th className="px-3 py-2 font-medium">Reference</th>
+                    <th className="px-3 py-2 font-medium">Performed By</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[...filteredStockActivity]
+                    .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))
+                    .map((row) => (
+                      <tr key={row.id} className="rounded-md bg-muted/30">
+                        <td className="px-3 py-2">{row.date}</td>
+                        <td className="px-3 py-2 font-medium text-foreground">{row.itemName}</td>
+                        <td className="px-3 py-2">
+                          <Badge variant="secondary">{row.activityType}</Badge>
+                        </td>
+                        <td className="px-3 py-2 tabular-nums">{row.quantity}</td>
+                        <td className="px-3 py-2">{row.source}</td>
+                        <td className="px-3 py-2">{row.destination}</td>
+                        <td className="px-3 py-2">{row.reference}</td>
+                        <td className="px-3 py-2">{row.performedBy}</td>
+                      </tr>
                     ))}
-                  </select>
-                </div>
-              </div>
+                </tbody>
+              </table>
             </div>
-            <table className="w-full min-w-[960px] text-left text-xs">
-              <thead>
-                <tr className="text-muted-foreground">
-                  <th className="px-4 py-3 font-medium">Movement ID</th>
-                  <th className="px-4 py-3 font-medium">Item Name</th>
-                  <th className="px-4 py-3 font-medium">Movement Type</th>
-                  <th className="px-4 py-3 font-medium">Transaction Type</th>
-                  <th className="px-4 py-3 font-medium">Quantity</th>
-                  <th className="px-4 py-3 font-medium">From Location</th>
-                  <th className="px-4 py-3 font-medium">To Location</th>
-                  <th className="px-4 py-3 font-medium">Date</th>
-                </tr>
-              </thead>
-              <tbody>
-                {[...filteredMovements]
-                  .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))
-                  .map((m) => (
-                    <tr key={m.id} className="border-t border-border/60">
-                      <td className="px-4 py-3 font-mono text-[11px] text-foreground">{m.id}</td>
-                      <td className="px-4 py-3 font-medium">{m.itemName}</td>
-                      <td className="px-4 py-3">{m.type}</td>
-                      <td className="px-4 py-3">{m.transactionType}</td>
-                      <td className="px-4 py-3 tabular-nums">{m.quantity}</td>
-                      <td className="px-4 py-3 text-muted-foreground">{invLocName(locations, m.fromLocationId)}</td>
-                      <td className="px-4 py-3 text-muted-foreground">{invLocName(locations, m.toLocationId)}</td>
-                      <td className="px-4 py-3 text-muted-foreground">{m.date}</td>
-                    </tr>
-                  ))}
-              </tbody>
-            </table>
           </div>
         </div>
       )}
@@ -1735,6 +1950,240 @@ export function InventoryModule() {
         </div>
       )}
 
+      <Dialog open={stockActionSelectionOpen} onOpenChange={setStockActionSelectionOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Select Stock Action</DialogTitle>
+            <DialogDescription>Choose one action type, then continue to details.</DialogDescription>
+          </DialogHeader>
+          <RadioGroup value={selectedStockAction} onValueChange={(value) => setSelectedStockAction(value as StockActionKind)} className="flex flex-col gap-3">
+            <label
+              htmlFor="stock-action-in"
+              className={cn(
+                "flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 transition-colors",
+                selectedStockAction === "in" ? "border-primary bg-primary/5" : "border-border",
+              )}
+            >
+              <RadioGroupItem value="in" id="stock-action-in" />
+              <span className="text-sm">Stock In</span>
+            </label>
+            <label
+              htmlFor="stock-action-out"
+              className={cn(
+                "flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 transition-colors",
+                selectedStockAction === "out" ? "border-primary bg-primary/5" : "border-border",
+              )}
+            >
+              <RadioGroupItem value="out" id="stock-action-out" />
+              <span className="text-sm">Stock Out</span>
+            </label>
+            <label
+              htmlFor="stock-action-return"
+              className={cn(
+                "flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 transition-colors",
+                selectedStockAction === "return" ? "border-primary bg-primary/5" : "border-border",
+              )}
+            >
+              <RadioGroupItem value="return" id="stock-action-return" />
+              <span className="text-sm">Return</span>
+            </label>
+            <label
+              htmlFor="stock-action-transfer"
+              className={cn(
+                "flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 transition-colors",
+                selectedStockAction === "transfer" ? "border-primary bg-primary/5" : "border-border",
+              )}
+            >
+              <RadioGroupItem value="transfer" id="stock-action-transfer" />
+              <span className="text-sm">Stock Transfer</span>
+            </label>
+          </RadioGroup>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setStockActionSelectionOpen(false)}>Cancel</Button>
+            <Button
+              onClick={() => {
+                setStockActionSelectionOpen(false);
+                openStockActionModal(selectedStockAction);
+              }}
+            >
+              Continue
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={stockActionModal === "in"} onOpenChange={(open) => (!open ? setStockActionModal(null) : undefined)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Stock In</DialogTitle>
+            <DialogDescription>Add incoming quantity to a warehouse or location.</DialogDescription>
+          </DialogHeader>
+          {stockActionError ? <p className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">{stockActionError}</p> : null}
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-muted-foreground">Item</label>
+              <Input list="stock-items-in" value={stockActionForm.itemName} onChange={(e) => setStockActionForm((f) => ({ ...f, itemName: e.target.value }))} placeholder="Item" />
+            </div>
+            <datalist id="stock-items-in">{itemOptions.map((name) => <option key={name} value={name} />)}</datalist>
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-muted-foreground">Quantity</label>
+              <Input type="number" min={1} value={stockActionForm.quantity} onChange={(e) => setStockActionForm((f) => ({ ...f, quantity: e.target.value }))} placeholder="Quantity" />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-muted-foreground">Source</label>
+              <Select value={stockActionForm.source} onValueChange={(value) => setStockActionForm((f) => ({ ...f, source: value }))}>
+                <SelectTrigger className="w-full"><SelectValue placeholder="Source" /></SelectTrigger>
+                <SelectContent><SelectGroup><SelectItem value="Supplier">Supplier</SelectItem><SelectItem value="Manual">Manual</SelectItem></SelectGroup></SelectContent>
+              </Select>
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-muted-foreground">Warehouse / Location</label>
+              <Select value={stockActionForm.locationId} onValueChange={(value) => setStockActionForm((f) => ({ ...f, locationId: value }))}>
+                <SelectTrigger className="w-full"><SelectValue placeholder="Warehouse / Location" /></SelectTrigger>
+                <SelectContent><SelectGroup>{locations.map((l) => <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>)}</SelectGroup></SelectContent>
+              </Select>
+            </div>
+            <div className="flex flex-col gap-1 sm:col-span-2">
+              <label className="text-xs font-medium text-muted-foreground">Optional Note</label>
+              <Textarea value={stockActionForm.note} onChange={(e) => setStockActionForm((f) => ({ ...f, note: e.target.value }))} placeholder="Optional note" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setStockActionModal(null)}>Cancel</Button>
+            <Button onClick={submitStockAction}>Save</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={stockActionModal === "out"} onOpenChange={(open) => (!open ? setStockActionModal(null) : undefined)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Stock Out</DialogTitle>
+            <DialogDescription>Issue stock from a warehouse or location.</DialogDescription>
+          </DialogHeader>
+          {stockActionError ? <p className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">{stockActionError}</p> : null}
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-muted-foreground">Item</label>
+              <Input list="stock-items-out" value={stockActionForm.itemName} onChange={(e) => setStockActionForm((f) => ({ ...f, itemName: e.target.value }))} placeholder="Item" />
+            </div>
+            <datalist id="stock-items-out">{itemOptions.map((name) => <option key={name} value={name} />)}</datalist>
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-muted-foreground">Quantity</label>
+              <Input type="number" min={1} value={stockActionForm.quantity} onChange={(e) => setStockActionForm((f) => ({ ...f, quantity: e.target.value }))} placeholder="Quantity" />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-muted-foreground">Destination</label>
+              <Select value={stockActionForm.destination} onValueChange={(value) => setStockActionForm((f) => ({ ...f, destination: value }))}>
+                <SelectTrigger className="w-full"><SelectValue placeholder="Destination" /></SelectTrigger>
+                <SelectContent><SelectGroup><SelectItem value="Department">Department</SelectItem><SelectItem value="Usage">Usage</SelectItem></SelectGroup></SelectContent>
+              </Select>
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-muted-foreground">Warehouse / Location</label>
+              <Select value={stockActionForm.locationId} onValueChange={(value) => setStockActionForm((f) => ({ ...f, locationId: value }))}>
+                <SelectTrigger className="w-full"><SelectValue placeholder="Warehouse / Location" /></SelectTrigger>
+                <SelectContent><SelectGroup>{locations.map((l) => <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>)}</SelectGroup></SelectContent>
+              </Select>
+            </div>
+            <div className="flex flex-col gap-1 sm:col-span-2">
+              <label className="text-xs font-medium text-muted-foreground">Optional Note</label>
+              <Textarea value={stockActionForm.note} onChange={(e) => setStockActionForm((f) => ({ ...f, note: e.target.value }))} placeholder="Optional note" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setStockActionModal(null)}>Cancel</Button>
+            <Button onClick={submitStockAction}>Save</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={stockActionModal === "return"} onOpenChange={(open) => (!open ? setStockActionModal(null) : undefined)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Return</DialogTitle>
+            <DialogDescription>Receive returned stock back into inventory.</DialogDescription>
+          </DialogHeader>
+          {stockActionError ? <p className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">{stockActionError}</p> : null}
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-muted-foreground">Item</label>
+              <Input list="stock-items-return" value={stockActionForm.itemName} onChange={(e) => setStockActionForm((f) => ({ ...f, itemName: e.target.value }))} placeholder="Item" />
+            </div>
+            <datalist id="stock-items-return">{itemOptions.map((name) => <option key={name} value={name} />)}</datalist>
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-muted-foreground">Quantity</label>
+              <Input type="number" min={1} value={stockActionForm.quantity} onChange={(e) => setStockActionForm((f) => ({ ...f, quantity: e.target.value }))} placeholder="Quantity" />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-muted-foreground">Return Source</label>
+              <Select value={stockActionForm.returnSource} onValueChange={(value) => setStockActionForm((f) => ({ ...f, returnSource: value }))}>
+                <SelectTrigger className="w-full"><SelectValue placeholder="Return Source" /></SelectTrigger>
+                <SelectContent><SelectGroup><SelectItem value="Department">Department</SelectItem><SelectItem value="User">User</SelectItem><SelectItem value="Warehouse">Warehouse</SelectItem></SelectGroup></SelectContent>
+              </Select>
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-muted-foreground">Warehouse / Location</label>
+              <Select value={stockActionForm.locationId} onValueChange={(value) => setStockActionForm((f) => ({ ...f, locationId: value }))}>
+                <SelectTrigger className="w-full"><SelectValue placeholder="Warehouse / Location" /></SelectTrigger>
+                <SelectContent><SelectGroup>{locations.map((l) => <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>)}</SelectGroup></SelectContent>
+              </Select>
+            </div>
+            <div className="flex flex-col gap-1 sm:col-span-2">
+              <label className="text-xs font-medium text-muted-foreground">Reason for Return</label>
+              <Textarea value={stockActionForm.returnReason} onChange={(e) => setStockActionForm((f) => ({ ...f, returnReason: e.target.value }))} placeholder="Reason for return (optional)" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setStockActionModal(null)}>Cancel</Button>
+            <Button onClick={submitStockAction}>Save</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={stockActionModal === "transfer"} onOpenChange={(open) => (!open ? setStockActionModal(null) : undefined)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Stock Transfer</DialogTitle>
+            <DialogDescription>Transfer stock between warehouses without changing total stock.</DialogDescription>
+          </DialogHeader>
+          {stockActionError ? <p className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">{stockActionError}</p> : null}
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-muted-foreground">Item</label>
+              <Input list="stock-items-transfer" value={stockActionForm.itemName} onChange={(e) => setStockActionForm((f) => ({ ...f, itemName: e.target.value }))} placeholder="Item" />
+            </div>
+            <datalist id="stock-items-transfer">{itemOptions.map((name) => <option key={name} value={name} />)}</datalist>
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-muted-foreground">Quantity</label>
+              <Input type="number" min={1} value={stockActionForm.quantity} onChange={(e) => setStockActionForm((f) => ({ ...f, quantity: e.target.value }))} placeholder="Quantity" />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-muted-foreground">From Warehouse</label>
+              <Select value={stockActionForm.fromLocationId} onValueChange={(value) => setStockActionForm((f) => ({ ...f, fromLocationId: value }))}>
+                <SelectTrigger className="w-full"><SelectValue placeholder="From Warehouse" /></SelectTrigger>
+                <SelectContent><SelectGroup>{locations.map((l) => <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>)}</SelectGroup></SelectContent>
+              </Select>
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-muted-foreground">To Warehouse</label>
+              <Select value={stockActionForm.toLocationId} onValueChange={(value) => setStockActionForm((f) => ({ ...f, toLocationId: value }))}>
+                <SelectTrigger className="w-full"><SelectValue placeholder="To Warehouse" /></SelectTrigger>
+                <SelectContent><SelectGroup>{locations.map((l) => <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>)}</SelectGroup></SelectContent>
+              </Select>
+            </div>
+            <div className="flex flex-col gap-1 sm:col-span-2">
+              <label className="text-xs font-medium text-muted-foreground">Note / Reason</label>
+              <Textarea value={stockActionForm.note} onChange={(e) => setStockActionForm((f) => ({ ...f, note: e.target.value }))} placeholder="Note / Reason (optional)" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setStockActionModal(null)}>Cancel</Button>
+            <Button onClick={submitStockAction}>Save</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {settingsModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
           <div className="no-scrollbar max-h-[min(92vh,760px)] w-full max-w-4xl overflow-y-auto rounded-lg border bg-card p-6 shadow-lg">
@@ -1803,8 +2252,47 @@ export function InventoryModule() {
             </div>
 
             <div className="space-y-6 text-xs">
-              <div className="space-y-4">
-                <p className="text-xs font-semibold text-foreground">Item Master</p>
+              <div className="grid gap-3 sm:grid-cols-3">
+                {(
+                  [
+                    [1, "Item Master"],
+                    [2, "Inventory Info"],
+                    [3, "Procurement Info"],
+                  ] as const
+                ).map(([stepNumber, label]) => (
+                  <button
+                    key={stepNumber}
+                    type="button"
+                    className={cn(
+                      "flex items-center gap-2 rounded-md px-3 py-2 text-xs",
+                      addItemStep === stepNumber
+                        ? "bg-primary/10 text-primary font-medium"
+                        : addItemStep > stepNumber
+                          ? "text-primary font-medium"
+                          : "text-muted-foreground",
+                    )}
+                    onClick={() => setAddItemStep(stepNumber)}
+                  >
+                    <span
+                      className={cn(
+                        "inline-flex h-5 w-5 items-center justify-center rounded-full text-[11px]",
+                        addItemStep === stepNumber
+                          ? "bg-primary text-primary-foreground"
+                          : addItemStep > stepNumber
+                            ? "bg-transparent text-primary ring-1 ring-primary/30"
+                            : "bg-current/15",
+                      )}
+                    >
+                      {stepNumber}
+                    </span>
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              {addItemStep === 1 && (
+                <div className="space-y-4">
+                  <p className="text-xs font-semibold text-foreground">Item Master</p>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="space-y-1">
                     <label className="text-xs font-medium text-muted-foreground">Item Name</label>
@@ -1864,10 +2352,12 @@ export function InventoryModule() {
                     <Input className="h-9 cursor-pointer text-xs file:mr-2" type="file" accept="image/*" />
                   </div>
                 </div>
-              </div>
+                </div>
+              )}
 
-              <div className="space-y-4">
-                <p className="text-xs font-semibold text-foreground">Inventory Info</p>
+              {addItemStep === 2 && (
+                <div className="space-y-4">
+                  <p className="text-xs font-semibold text-foreground">Inventory Info</p>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="space-y-1">
                     <label className="text-xs font-medium text-muted-foreground">Store</label>
@@ -1931,9 +2421,10 @@ export function InventoryModule() {
                     </select>
                   </div>
                 </div>
-              </div>
+                </div>
+              )}
 
-              {!isConsumableType ? (
+              {addItemStep === 2 && !isConsumableType ? (
                 <div className="space-y-4">
                   <p className="text-xs font-semibold text-foreground">Asset/Tool Details</p>
                   <div className="grid gap-3 sm:grid-cols-2">
@@ -1973,8 +2464,9 @@ export function InventoryModule() {
                 </div>
               ) : null}
 
-              <div className="space-y-4">
-                <p className="text-xs font-semibold text-foreground">Procurement Info</p>
+              {addItemStep === 3 && (
+                <div className="space-y-4">
+                  <p className="text-xs font-semibold text-foreground">Procurement Info</p>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="space-y-1">
                     <label className="text-xs font-medium text-muted-foreground">Price</label>
@@ -2008,10 +2500,12 @@ export function InventoryModule() {
                     <Input className="h-9 cursor-pointer text-xs file:mr-2" type="file" />
                   </div>
                 </div>
-              </div>
+                </div>
+              )}
 
-              <div className="space-y-4">
-                <p className="text-xs font-semibold text-foreground">Assignment</p>
+              {addItemStep === 3 && (
+                <div className="space-y-4">
+                  <p className="text-xs font-semibold text-foreground">Assignment</p>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="space-y-1">
                     <label className="text-xs font-medium text-muted-foreground">Department</label>
@@ -2044,8 +2538,9 @@ export function InventoryModule() {
                     </select>
                   </div>
                 </div>
-              </div>
-              {disableSerialTracking && isToolOrAssetType ? (
+                </div>
+              )}
+              {addItemStep === 2 && disableSerialTracking && isToolOrAssetType ? (
                 <p className="text-[11px] text-amber-700">Serial tracking is disabled for bulk items (quantity greater than 1).</p>
               ) : null}
               {addItemError ? <p className="text-xs text-red-600">{addItemError}</p> : null}
@@ -2058,13 +2553,25 @@ export function InventoryModule() {
                 onClick={() => {
                   setAddItemError("");
                   setAddItemModalOpen(false);
+                  setAddItemStep(1);
                 }}
               >
                 Cancel
               </Button>
-              <Button className="h-9 min-w-24 text-white hover:opacity-90" style={{ backgroundColor: PRIMARY }} onClick={submitAddItem}>
-                Save item
-              </Button>
+              {addItemStep > 1 ? (
+                <Button type="button" variant="outline" className="h-9 min-w-24" onClick={() => setAddItemStep((s) => (s === 3 ? 2 : 1))}>
+                  Back
+                </Button>
+              ) : null}
+              {addItemStep < 3 ? (
+                <Button type="button" className="h-9 min-w-24" onClick={() => setAddItemStep((s) => (s === 1 ? 2 : 3))}>
+                  Next
+                </Button>
+              ) : (
+                <Button className="h-9 min-w-24 text-white hover:opacity-90" style={{ backgroundColor: PRIMARY }} onClick={submitAddItem}>
+                  Save item
+                </Button>
+              )}
             </div>
           </div>
         </div>

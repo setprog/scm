@@ -25,6 +25,7 @@ import {
 import * as XLSX from "xlsx";
 import {
   Activity,
+  ArrowLeft,
   Bell,
   Boxes,
   Building2,
@@ -64,12 +65,13 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 
 type MainModule =
   | "Dashboard"
   | "Procurement"
-  | "Project"
+  | "Purchase Types"
   | "Sourcing"
   | "Inventory"
   | "Budget"
@@ -89,7 +91,7 @@ type ProcurementNamedSettingsRow = { id: string; name: string; description: stri
 
 const modules: { label: MainModule; icon: React.ElementType }[] = [
   { label: "Dashboard", icon: LayoutGrid },
-  { label: "Project", icon: Building2 },
+  { label: "Purchase Types", icon: Building2 },
   { label: "Sourcing", icon: Users },
   { label: "Procurement", icon: ShoppingCart },
   { label: "Inventory", icon: Boxes },
@@ -3135,7 +3137,6 @@ function ProcurementModule({
     };
     if (activeRole === "All") return filteredPrRows;
     if (activeRole === "Field Engineer") {
-      // Field Engineer tracks PRs they created, even when ownership shifts for approval/sourcing.
       return filteredPrRows.filter((r) => r.requester === "Alex Johnson");
     }
     return filteredPrRows.filter((r) => inferredOwnerRole(r.owner) === activeRole);
@@ -3165,8 +3166,6 @@ function ProcurementModule({
     [poRows, poFilters.requestSource, poFilters.projectId, poFilters.departmentId, poStatusFilter],
   );
   const roleAwarePoRows = useMemo(() => {
-    // PO records are shared across sourcing, project, logistics, and approver stakeholders.
-    // "All" should always show the combined shared list.
     if (activeRole === "All") return filteredPoRows;
     if (activeRole === "Sourcing Officer" || activeRole === "Team Lead" || activeRole === "Logistics Officer" || activeRole === "Approver") return filteredPoRows;
     return [];
@@ -4387,12 +4386,12 @@ function ProcurementModule({
                             row.status === "Pending Sourcing" || row.status === "In Sourcing" || row.status === "In Sourcing Process" ? (
                               <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
-                                  <Button size="icon-sm" variant="ghost" aria-label="Open actions">
+                                  <Button size="icon-sm" variant="ghost" aria-label="View actions">
                                     <MoreVertical className="h-4 w-4" />
                                   </Button>
                                 </DropdownMenuTrigger>
                                 <DropdownMenuContent side="left" align="start" className="w-52">
-                                  <DropdownMenuItem onClick={() => setPrDetailRow(row)}>Open</DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => setPrDetailRow(row)}>View</DropdownMenuItem>
                                   {row.status === "Pending Sourcing" ? (
                                     <DropdownMenuItem onClick={() => updatePrStatus(row.ref, "In Sourcing")}>Accept PR</DropdownMenuItem>
                                   ) : null}
@@ -4401,7 +4400,7 @@ function ProcurementModule({
                                 </DropdownMenuContent>
                               </DropdownMenu>
                             ) : (
-                              <Button size="icon-sm" variant="ghost" aria-label="Open" onClick={() => setPrDetailRow(row)}>
+                              <Button size="icon-sm" variant="ghost" aria-label="View" onClick={() => setPrDetailRow(row)}>
                                 <Eye className="h-4 w-4" />
                               </Button>
                             )
@@ -4409,7 +4408,7 @@ function ProcurementModule({
                             row.status === "Pending Approval" ? (
                               <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
-                                  <Button size="icon-sm" variant="ghost" aria-label="Open actions">
+                                  <Button size="icon-sm" variant="ghost" aria-label="View actions">
                                     <MoreVertical className="h-4 w-4" />
                                   </Button>
                                 </DropdownMenuTrigger>
@@ -4420,12 +4419,12 @@ function ProcurementModule({
                                 </DropdownMenuContent>
                               </DropdownMenu>
                             ) : (
-                              <Button size="icon-sm" variant="ghost" aria-label="Open" onClick={() => setPrDetailRow(row)}>
+                              <Button size="icon-sm" variant="ghost" aria-label="View" onClick={() => setPrDetailRow(row)}>
                                 <Eye className="h-4 w-4" />
                               </Button>
                             )
                           ) : (
-                            <Button size="icon-sm" variant="ghost" aria-label="Open" onClick={() => setPrDetailRow(row)}>
+                            <Button size="icon-sm" variant="ghost" aria-label="View" onClick={() => setPrDetailRow(row)}>
                               <Eye className="h-4 w-4" />
                             </Button>
                           )}
@@ -4512,7 +4511,7 @@ function ProcurementModule({
                         <td className="px-3 py-2 text-right">
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
-                              <Button size="icon-sm" variant="ghost" aria-label="Open actions">
+                              <Button size="icon-sm" variant="ghost" aria-label="View actions">
                                 <MoreVertical className="h-4 w-4" />
                               </Button>
                             </DropdownMenuTrigger>
@@ -4905,7 +4904,7 @@ function ProcurementModule({
                         <td className="px-3 py-2 text-right">
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
-                              <Button size="icon-sm" variant="ghost" aria-label="Open actions">
+                              <Button size="icon-sm" variant="ghost" aria-label="View actions">
                                 <MoreVertical className="h-4 w-4" />
                               </Button>
                             </DropdownMenuTrigger>
@@ -5356,7 +5355,7 @@ function ProcurementModule({
                     </p>
                   );
                 })()}
-                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                <div className="grid justify-items-start gap-3 md:grid-cols-2 xl:grid-cols-3">
                   {compareSortedQuotes.map((q) => {
                     const isBest = compareBestSupplier && q.supplier === compareBestSupplier;
                     const prRef = compareModalRfq?.prRef ?? "";
@@ -9814,6 +9813,1569 @@ function ModuleSidebar({
   );
 }
 
+function PurchaseTypesModule() {
+  type PurchaseTypeView = "landing" | "project" | "standard" | "emergency";
+  type ProjectFundingType = "Donor" | "Grant" | "Internal";
+  type ProjectStatus = "Active" | "Completed" | "Planned";
+  type ProjectItemType = "Goods" | "Service";
+  type StandardBudgetType = "Operational" | "Departmental";
+  type StandardStatus = "Active" | "Inactive";
+  type StandardItemType = "Goods" | "Service";
+  type StandardFrequency = "One-time" | "Monthly" | "Annual";
+  type EmergencyType = "Equipment" | "Facility" | "IT" | "Safety" | "Other";
+  type EmergencyPriority = "High" | "Critical";
+  type EmergencyStatus = "Open" | "In Progress" | "Resolved";
+  type EmergencyItemType = "Goods" | "Service";
+  type EmergencyItemCategory = "Repair" | "Equipment" | "Service" | "Logistics";
+  type ProjectRecord = {
+    id: string;
+    name: string;
+    code: string;
+    description: string;
+    startDate: string;
+    endDate: string;
+    fundingType: ProjectFundingType;
+    budgetAmount: string;
+    currency: string;
+    projectType: string;
+    departmentProgram: string;
+    requiresStrictDocumentation: boolean;
+    requiresApprovalControl: boolean;
+  };
+  type ProjectItemRow = {
+    id: string;
+    name: string;
+    category: string;
+    type: ProjectItemType;
+    estimatedCost: string;
+    notes: string;
+  };
+  type StandardCategoryRecord = {
+    id: string;
+    name: string;
+    description: string;
+    department: string;
+    budgetType: StandardBudgetType;
+    budgetLimit: string;
+    recurringPurchase: boolean;
+    contractBased: boolean;
+    isActive: boolean;
+  };
+  type StandardItemRow = {
+    id: string;
+    name: string;
+    category: "IT" | "Office" | "Facility" | "Service";
+    type: StandardItemType;
+    estimatedCost: string;
+    frequency: StandardFrequency;
+    notes: string;
+  };
+  type EmergencyCaseRecord = {
+    id: string;
+    title: string;
+    code: string;
+    description: string;
+    emergencyType: EmergencyType;
+    priority: EmergencyPriority;
+    reportedDate: string;
+    requiredActionDate: string;
+    requiresImmediateAction: boolean;
+    requiresPostReview: boolean;
+    status: EmergencyStatus;
+    justification: string;
+    impact: string;
+    postActionNotes: string;
+  };
+  type EmergencyItemRow = {
+    id: string;
+    name: string;
+    category: EmergencyItemCategory;
+    type: EmergencyItemType;
+    estimatedCost: string;
+    urgencyLevel: EmergencyPriority;
+    notes: string;
+  };
+
+  const [activeView, setActiveView] = useState<PurchaseTypeView>("landing");
+  const [projectMode, setProjectMode] = useState<"list" | "create" | "detail" | "edit">("list");
+  const [standardMode, setStandardMode] = useState<"list" | "create" | "detail" | "edit">("list");
+  const [emergencyMode, setEmergencyMode] = useState<"list" | "create" | "detail" | "edit">("list");
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const [selectedStandardId, setSelectedStandardId] = useState<string | null>(null);
+  const [selectedEmergencyId, setSelectedEmergencyId] = useState<string | null>(null);
+  const [projectError, setProjectError] = useState<string | null>(null);
+  const [standardError, setStandardError] = useState<string | null>(null);
+  const [emergencyError, setEmergencyError] = useState<string | null>(null);
+  const [projects, setProjects] = useState<ProjectRecord[]>([]);
+  const [standardCategories, setStandardCategories] = useState<StandardCategoryRecord[]>([]);
+  const [emergencyCases, setEmergencyCases] = useState<EmergencyCaseRecord[]>([]);
+  const [projectItemsById, setProjectItemsById] = useState<Record<string, ProjectItemRow[]>>({});
+  const [standardItemsById, setStandardItemsById] = useState<Record<string, StandardItemRow[]>>({});
+  const [emergencyItemsById, setEmergencyItemsById] = useState<Record<string, EmergencyItemRow[]>>({});
+  const [itemModalOpen, setItemModalOpen] = useState(false);
+  const [standardItemModalOpen, setStandardItemModalOpen] = useState(false);
+  const [emergencyItemModalOpen, setEmergencyItemModalOpen] = useState(false);
+  const [itemError, setItemError] = useState<string | null>(null);
+  const [standardItemError, setStandardItemError] = useState<string | null>(null);
+  const [emergencyItemError, setEmergencyItemError] = useState<string | null>(null);
+  const [projectForm, setProjectForm] = useState<ProjectRecord>({
+    id: "",
+    name: "",
+    code: "",
+    description: "",
+    startDate: "",
+    endDate: "",
+    fundingType: "Donor",
+    budgetAmount: "",
+    currency: "USD",
+    projectType: "",
+    departmentProgram: "",
+    requiresStrictDocumentation: true,
+    requiresApprovalControl: true,
+  });
+  const [itemForm, setItemForm] = useState<ProjectItemRow>({
+    id: "",
+    name: "",
+    category: "",
+    type: "Goods",
+    estimatedCost: "",
+    notes: "",
+  });
+  const [standardForm, setStandardForm] = useState<StandardCategoryRecord>({
+    id: "",
+    name: "",
+    description: "",
+    department: "",
+    budgetType: "Operational",
+    budgetLimit: "",
+    recurringPurchase: true,
+    contractBased: false,
+    isActive: true,
+  });
+  const [standardItemForm, setStandardItemForm] = useState<StandardItemRow>({
+    id: "",
+    name: "",
+    category: "Office",
+    type: "Goods",
+    estimatedCost: "",
+    frequency: "Monthly",
+    notes: "",
+  });
+  const [emergencyForm, setEmergencyForm] = useState<EmergencyCaseRecord>({
+    id: "",
+    title: "",
+    code: "",
+    description: "",
+    emergencyType: "Equipment",
+    priority: "High",
+    reportedDate: "",
+    requiredActionDate: "",
+    requiresImmediateAction: true,
+    requiresPostReview: true,
+    status: "Open",
+    justification: "",
+    impact: "",
+    postActionNotes: "",
+  });
+  const [emergencyItemForm, setEmergencyItemForm] = useState<EmergencyItemRow>({
+    id: "",
+    name: "",
+    category: "Repair",
+    type: "Goods",
+    estimatedCost: "",
+    urgencyLevel: "High",
+    notes: "",
+  });
+
+  const selectedProject = useMemo(
+    () => projects.find((project) => project.id === selectedProjectId) ?? null,
+    [projects, selectedProjectId],
+  );
+  const selectedProjectItems = useMemo(
+    () => (selectedProjectId ? projectItemsById[selectedProjectId] ?? [] : []),
+    [projectItemsById, selectedProjectId],
+  );
+  const selectedStandard = useMemo(
+    () => standardCategories.find((category) => category.id === selectedStandardId) ?? null,
+    [standardCategories, selectedStandardId],
+  );
+  const selectedStandardItems = useMemo(
+    () => (selectedStandardId ? standardItemsById[selectedStandardId] ?? [] : []),
+    [selectedStandardId, standardItemsById],
+  );
+  const selectedEmergency = useMemo(
+    () => emergencyCases.find((row) => row.id === selectedEmergencyId) ?? null,
+    [emergencyCases, selectedEmergencyId],
+  );
+  const selectedEmergencyItems = useMemo(
+    () => (selectedEmergencyId ? emergencyItemsById[selectedEmergencyId] ?? [] : []),
+    [emergencyItemsById, selectedEmergencyId],
+  );
+
+  const deriveProjectStatus = useCallback((project: ProjectRecord): ProjectStatus => {
+    const today = new Date();
+    const start = project.startDate ? new Date(project.startDate) : null;
+    const end = project.endDate ? new Date(project.endDate) : null;
+    if (end && end < today) return "Completed";
+    if (start && start > today) return "Planned";
+    return "Active";
+  }, []);
+
+  const projectStatusBadgeClass = useCallback((status: ProjectStatus) => {
+    if (status === "Completed") return "bg-slate-200 text-slate-700";
+    if (status === "Planned") return "bg-blue-100 text-blue-700";
+    return "bg-emerald-100 text-emerald-700";
+  }, []);
+  const standardStatusBadgeClass = useCallback((status: StandardStatus) => {
+    if (status === "Inactive") return "bg-slate-200 text-slate-700";
+    return "bg-emerald-100 text-emerald-700";
+  }, []);
+  const emergencyPriorityBadgeClass = useCallback((priority: EmergencyPriority) => {
+    if (priority === "Critical") return "bg-red-100 text-red-700";
+    return "bg-amber-100 text-amber-700";
+  }, []);
+  const emergencyStatusBadgeClass = useCallback((status: EmergencyStatus) => {
+    if (status === "Resolved") return "bg-emerald-100 text-emerald-700";
+    if (status === "In Progress") return "bg-blue-100 text-blue-700";
+    return "bg-slate-200 text-slate-700";
+  }, []);
+
+  const resetProjectForm = useCallback(() => {
+    setProjectForm({
+      id: "",
+      name: "",
+      code: "",
+      description: "",
+      startDate: "",
+      endDate: "",
+      fundingType: "Donor",
+      budgetAmount: "",
+      currency: "USD",
+      projectType: "",
+      departmentProgram: "",
+      requiresStrictDocumentation: true,
+      requiresApprovalControl: true,
+    });
+    setProjectError(null);
+  }, []);
+
+  const openCreateProject = useCallback(() => {
+    resetProjectForm();
+    setProjectMode("create");
+  }, [resetProjectForm]);
+
+  const openEditProject = useCallback((project: ProjectRecord) => {
+    setProjectForm(project);
+    setProjectError(null);
+    setProjectMode("edit");
+  }, []);
+
+  const openProjectDetail = useCallback((projectId: string) => {
+    setSelectedProjectId(projectId);
+    setProjectMode("detail");
+  }, []);
+
+  const submitProject = useCallback(
+    (e: React.FormEvent<HTMLFormElement>) => {
+      e.preventDefault();
+      setProjectError(null);
+
+      if (!projectForm.name.trim()) return setProjectError("Project Name is required.");
+      if (!projectForm.code.trim()) return setProjectError("Project Code is required.");
+      if (!projectForm.startDate || !projectForm.endDate) return setProjectError("Start Date and End Date are required.");
+      if (new Date(projectForm.endDate) < new Date(projectForm.startDate)) {
+        return setProjectError("End Date cannot be earlier than Start Date.");
+      }
+      const parsedBudget = Number(projectForm.budgetAmount);
+      if (!Number.isFinite(parsedBudget) || parsedBudget < 0) return setProjectError("Budget Amount must be a valid number.");
+      if (projectMode === "edit" && projectForm.id) {
+        setProjects((prev) => prev.map((row) => (row.id === projectForm.id ? projectForm : row)));
+        setSelectedProjectId(projectForm.id);
+      } else {
+        const id = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random());
+        const nextProject = { ...projectForm, id };
+        setProjects((prev) => [nextProject, ...prev]);
+        setSelectedProjectId(id);
+      }
+
+      setProjectMode("list");
+      resetProjectForm();
+    },
+    [projectForm, projectMode, resetProjectForm],
+  );
+
+  const openAddItem = useCallback(() => {
+    if (!selectedProjectId) return;
+    setItemForm({
+      id: "",
+      name: "",
+      category: "",
+      type: "Goods",
+      estimatedCost: "",
+      notes: "",
+    });
+    setItemError(null);
+    setItemModalOpen(true);
+  }, [selectedProjectId]);
+  const resetStandardForm = useCallback(() => {
+    setStandardForm({
+      id: "",
+      name: "",
+      description: "",
+      department: "",
+      budgetType: "Operational",
+      budgetLimit: "",
+      recurringPurchase: true,
+      contractBased: false,
+      isActive: true,
+    });
+    setStandardError(null);
+  }, []);
+  const openCreateStandard = useCallback(() => {
+    resetStandardForm();
+    setStandardMode("create");
+  }, [resetStandardForm]);
+  const openEditStandard = useCallback((category: StandardCategoryRecord) => {
+    setStandardForm(category);
+    setStandardError(null);
+    setStandardMode("edit");
+  }, []);
+  const openStandardDetail = useCallback((categoryId: string) => {
+    setSelectedStandardId(categoryId);
+    setStandardMode("detail");
+  }, []);
+  const submitStandardCategory = useCallback(
+    (e: React.FormEvent<HTMLFormElement>) => {
+      e.preventDefault();
+      setStandardError(null);
+      if (!standardForm.name.trim()) return setStandardError("Category Name is required.");
+      if (!standardForm.department.trim()) return setStandardError("Department / Team is required.");
+      if (standardForm.budgetLimit.trim()) {
+        const parsed = Number(standardForm.budgetLimit);
+        if (!Number.isFinite(parsed) || parsed < 0) return setStandardError("Budget Limit must be a valid number.");
+      }
+      if (standardMode === "edit" && standardForm.id) {
+        setStandardCategories((prev) => prev.map((row) => (row.id === standardForm.id ? standardForm : row)));
+        setSelectedStandardId(standardForm.id);
+      } else {
+        const id = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random());
+        const next = { ...standardForm, id };
+        setStandardCategories((prev) => [next, ...prev]);
+        setSelectedStandardId(id);
+      }
+      setStandardMode("list");
+      resetStandardForm();
+    },
+    [resetStandardForm, standardForm, standardMode],
+  );
+  const openAddStandardItem = useCallback(() => {
+    if (!selectedStandardId) return;
+    setStandardItemForm({
+      id: "",
+      name: "",
+      category: "Office",
+      type: "Goods",
+      estimatedCost: "",
+      frequency: "Monthly",
+      notes: "",
+    });
+    setStandardItemError(null);
+    setStandardItemModalOpen(true);
+  }, [selectedStandardId]);
+  const submitStandardItem = useCallback(() => {
+    if (!selectedStandardId) return;
+    if (!standardItemForm.name.trim()) return setStandardItemError("Item / Service Name is required.");
+    const parsed = Number(standardItemForm.estimatedCost);
+    if (!Number.isFinite(parsed) || parsed < 0) return setStandardItemError("Estimated Cost must be a valid number.");
+    const id = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random());
+    const nextRow = { ...standardItemForm, id };
+    setStandardItemsById((prev) => ({
+      ...prev,
+      [selectedStandardId]: [nextRow, ...(prev[selectedStandardId] ?? [])],
+    }));
+    setStandardItemModalOpen(false);
+  }, [selectedStandardId, standardItemForm]);
+  const resetEmergencyForm = useCallback(() => {
+    setEmergencyForm({
+      id: "",
+      title: "",
+      code: "",
+      description: "",
+      emergencyType: "Equipment",
+      priority: "High",
+      reportedDate: "",
+      requiredActionDate: "",
+      requiresImmediateAction: true,
+      requiresPostReview: true,
+      status: "Open",
+      justification: "",
+      impact: "",
+      postActionNotes: "",
+    });
+    setEmergencyError(null);
+  }, []);
+  const nextEmergencyCode = useCallback(() => {
+    const total = emergencyCases.length + 1;
+    return `EMG-${String(total).padStart(4, "0")}`;
+  }, [emergencyCases.length]);
+  const openCreateEmergency = useCallback(() => {
+    resetEmergencyForm();
+    setEmergencyForm((prev) => ({ ...prev, code: nextEmergencyCode(), reportedDate: new Date().toISOString().slice(0, 10) }));
+    setEmergencyMode("create");
+  }, [nextEmergencyCode, resetEmergencyForm]);
+  const openEditEmergency = useCallback((row: EmergencyCaseRecord) => {
+    setEmergencyForm(row);
+    setEmergencyError(null);
+    setEmergencyMode("edit");
+  }, []);
+  const openEmergencyDetail = useCallback((id: string) => {
+    setSelectedEmergencyId(id);
+    setEmergencyMode("detail");
+  }, []);
+  const submitEmergencyCase = useCallback(
+    (e: React.FormEvent<HTMLFormElement>) => {
+      e.preventDefault();
+      setEmergencyError(null);
+      if (!emergencyForm.title.trim()) return setEmergencyError("Case Title is required.");
+      if (!emergencyForm.code.trim()) return setEmergencyError("Case Code is required.");
+      if (!emergencyForm.description.trim()) return setEmergencyError("Description is required.");
+      if (!emergencyForm.reportedDate) return setEmergencyError("Reported Date is required.");
+      if (!emergencyForm.justification.trim()) return setEmergencyError("Justification is required.");
+      if (emergencyForm.requiredActionDate && new Date(emergencyForm.requiredActionDate) < new Date(emergencyForm.reportedDate)) {
+        return setEmergencyError("Required Action Date cannot be earlier than Reported Date.");
+      }
+      if (emergencyMode === "edit" && emergencyForm.id) {
+        setEmergencyCases((prev) => prev.map((row) => (row.id === emergencyForm.id ? emergencyForm : row)));
+        setSelectedEmergencyId(emergencyForm.id);
+      } else {
+        const id = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random());
+        const row = { ...emergencyForm, id };
+        setEmergencyCases((prev) => [row, ...prev]);
+        setSelectedEmergencyId(id);
+      }
+      setEmergencyMode("list");
+      resetEmergencyForm();
+    },
+    [emergencyForm, emergencyMode, resetEmergencyForm],
+  );
+  const openAddEmergencyItem = useCallback(() => {
+    if (!selectedEmergencyId) return;
+    setEmergencyItemForm({
+      id: "",
+      name: "",
+      category: "Repair",
+      type: "Goods",
+      estimatedCost: "",
+      urgencyLevel: "High",
+      notes: "",
+    });
+    setEmergencyItemError(null);
+    setEmergencyItemModalOpen(true);
+  }, [selectedEmergencyId]);
+  const submitEmergencyItem = useCallback(() => {
+    if (!selectedEmergencyId) return;
+    if (!emergencyItemForm.name.trim()) return setEmergencyItemError("Item / Service Name is required.");
+    const parsed = Number(emergencyItemForm.estimatedCost);
+    if (!Number.isFinite(parsed) || parsed < 0) return setEmergencyItemError("Estimated Cost must be a valid number.");
+    const id = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random());
+    const row = { ...emergencyItemForm, id };
+    setEmergencyItemsById((prev) => ({
+      ...prev,
+      [selectedEmergencyId]: [row, ...(prev[selectedEmergencyId] ?? [])],
+    }));
+    setEmergencyItemModalOpen(false);
+  }, [emergencyItemForm, selectedEmergencyId]);
+
+  const submitProjectItem = useCallback(() => {
+    if (!selectedProjectId) return;
+    if (!itemForm.name.trim()) return setItemError("Item / Service Name is required.");
+    if (!itemForm.category.trim()) return setItemError("Category is required.");
+    const estimated = Number(itemForm.estimatedCost);
+    if (!Number.isFinite(estimated) || estimated < 0) return setItemError("Estimated Cost must be a valid number.");
+
+    const id = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random());
+    const row = { ...itemForm, id };
+    setProjectItemsById((prev) => ({
+      ...prev,
+      [selectedProjectId]: [row, ...(prev[selectedProjectId] ?? [])],
+    }));
+    setItemModalOpen(false);
+  }, [itemForm, selectedProjectId]);
+
+  return (
+    <div className="space-y-4">
+      <div className="space-y-4">
+          {activeView === "landing" ? (
+            <div className="space-y-4">
+              <div className="grid gap-3 sm:grid-cols-3">
+                {[
+                  {
+                    key: "project",
+                    title: "Project",
+                    desc: "Project-bound procurement with budget and compliance controls.",
+                  },
+                  {
+                    key: "standard",
+                    title: "Standard",
+                    desc: "Operational purchasing under normal approval and budgeting rules.",
+                  },
+                  {
+                    key: "emergency",
+                    title: "Emergency",
+                    desc: "Urgent procurement with accelerated processing and justification.",
+                  },
+                ].map((card) => (
+                  <button
+                    key={card.key}
+                    type="button"
+                    className={cn(
+                      "rounded-lg border bg-white p-4 text-left transition-colors hover:bg-muted/40",
+                      activeView === card.key ? "border-primary bg-primary/5" : "border-border",
+                    )}
+                    onClick={() => {
+                      if (card.key === "project") {
+                        setActiveView("project");
+                        setProjectMode("list");
+                      } else if (card.key === "standard") {
+                        setActiveView("standard");
+                        setStandardMode("list");
+                      } else {
+                        setActiveView("emergency");
+                        setEmergencyMode("list");
+                      }
+                    }}
+                  >
+                    <p className="text-sm font-semibold">{card.title}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">{card.desc}</p>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {activeView === "project" ? (
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-3">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon-sm"
+                    onClick={() => {
+                      setActiveView("landing");
+                      setProjectMode("list");
+                    }}
+                    aria-label="Back to purchase type selection"
+                  >
+                    <ArrowLeft />
+                  </Button>
+                  <div>
+                    <p className="text-sm font-semibold">Projects</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button type="button" size="sm" onClick={openCreateProject}>
+                    <Plus className="mr-1 h-3.5 w-3.5" />
+                    Create Project
+                  </Button>
+                </div>
+              </div>
+
+              {projectMode === "list" ? (
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                  {projects.length === 0 ? (
+                    <Card className="w-full max-w-none border-0 ring-0 bg-transparent shadow-none md:col-span-2 xl:col-span-3">
+                      <CardContent className="py-8 text-center text-xs text-muted-foreground">
+                        No projects created yet.
+                      </CardContent>
+                    </Card>
+                  ) : (
+                    projects.map((project) => {
+                      const status = deriveProjectStatus(project);
+                      return (
+                        <button
+                          key={project.id}
+                          type="button"
+                          onClick={() => openProjectDetail(project.id)}
+                          className="w-full max-w-[340px] rounded-lg border bg-card p-4 text-left transition-colors hover:bg-muted/30"
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2">
+                                <p className="truncate text-sm font-semibold">{project.name}</p>
+                                <Badge className={cn("hover:opacity-100", projectStatusBadgeClass(status))}>{status}</Badge>
+                              </div>
+                              <p className="text-xs text-muted-foreground">{project.code}</p>
+                            </div>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  type="button"
+                                  size="icon-sm"
+                                  variant="ghost"
+                                  onClick={(e) => e.stopPropagation()}
+                                  aria-label="View actions"
+                                >
+                                  <MoreVertical />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    openProjectDetail(project.id);
+                                  }}
+                                >
+                                  View
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    openEditProject(project);
+                                  }}
+                                >
+                                  Edit
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </div>
+                          <div className="mt-3 grid gap-2 text-xs">
+                            <div>
+                              <p className="text-muted-foreground">Timeline</p>
+                              <p className="font-medium">{project.startDate} → {project.endDate}</p>
+                            </div>
+                            <div>
+                              <p className="text-muted-foreground">Budget</p>
+                              <p className="font-medium">
+                                {new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(Number(project.budgetAmount || 0))} {project.currency}
+                              </p>
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+              ) : null}
+
+              {(projectMode === "create" || projectMode === "edit") ? (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
+                  <div className="flex max-h-[min(88vh,680px)] w-full max-w-3xl flex-col rounded-lg border bg-card p-6 shadow-lg">
+                    <div className="mb-4 flex items-center justify-between">
+                      <h3 className="text-sm font-semibold">{projectMode === "create" ? "Create Project" : "Edit Project"}</h3>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        onClick={() => {
+                          setProjectMode("list");
+                          resetProjectForm();
+                        }}
+                        aria-label="Close project form"
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    <form className="flex min-h-0 flex-1 flex-col" onSubmit={submitProject}>
+                      <div className="no-scrollbar min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
+                      <section className="space-y-2">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Basic Information</p>
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          <div className="space-y-1">
+                            <label className="text-xs font-medium">Project Name</label>
+                            <Input className="h-9" value={projectForm.name} onChange={(e) => setProjectForm((prev) => ({ ...prev, name: e.target.value }))} />
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-xs font-medium">Project Code</label>
+                            <Input className="h-9" value={projectForm.code} onChange={(e) => setProjectForm((prev) => ({ ...prev, code: e.target.value }))} />
+                          </div>
+                          <div className="space-y-1 sm:col-span-2">
+                            <label className="text-xs font-medium">Description</label>
+                            <textarea
+                              className="min-h-[72px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-xs outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+                              value={projectForm.description}
+                              onChange={(e) => setProjectForm((prev) => ({ ...prev, description: e.target.value }))}
+                            />
+                          </div>
+                        </div>
+                      </section>
+
+                      <section className="space-y-2">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Timeline</p>
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          <div className="space-y-1">
+                            <label className="text-xs font-medium">Start Date</label>
+                            <Input className="h-9" type="date" value={projectForm.startDate} onChange={(e) => setProjectForm((prev) => ({ ...prev, startDate: e.target.value }))} />
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-xs font-medium">End Date</label>
+                            <Input className="h-9" type="date" value={projectForm.endDate} onChange={(e) => setProjectForm((prev) => ({ ...prev, endDate: e.target.value }))} />
+                          </div>
+                        </div>
+                      </section>
+
+                      <section className="space-y-2">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Funding</p>
+                        <div className="grid gap-3 sm:grid-cols-3">
+                          <div className="space-y-1">
+                            <label className="text-xs font-medium">Funding Type</label>
+                            <select className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-xs" value={projectForm.fundingType} onChange={(e) => setProjectForm((prev) => ({ ...prev, fundingType: e.target.value as ProjectFundingType }))}>
+                              <option value="Donor">Donor</option>
+                              <option value="Grant">Grant</option>
+                              <option value="Internal">Internal</option>
+                            </select>
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-xs font-medium">Budget Amount</label>
+                            <Input className="h-9" value={projectForm.budgetAmount} onChange={(e) => setProjectForm((prev) => ({ ...prev, budgetAmount: e.target.value }))} />
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-xs font-medium">Currency</label>
+                            <select className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-xs" value={projectForm.currency} onChange={(e) => setProjectForm((prev) => ({ ...prev, currency: e.target.value }))}>
+                              <option>USD</option>
+                              <option>EUR</option>
+                              <option>ETB</option>
+                            </select>
+                          </div>
+                        </div>
+                      </section>
+
+                      <section className="space-y-2">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Compliance</p>
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          <label className="flex items-center justify-between rounded-md border px-3 py-2">
+                            <span className="text-xs">Requires Strict Documentation</span>
+                            <input type="checkbox" checked={projectForm.requiresStrictDocumentation} onChange={(e) => setProjectForm((prev) => ({ ...prev, requiresStrictDocumentation: e.target.checked }))} />
+                          </label>
+                          <label className="flex items-center justify-between rounded-md border px-3 py-2">
+                            <span className="text-xs">Requires Approval Control</span>
+                            <input type="checkbox" checked={projectForm.requiresApprovalControl} onChange={(e) => setProjectForm((prev) => ({ ...prev, requiresApprovalControl: e.target.checked }))} />
+                          </label>
+                        </div>
+                      </section>
+                      </div>
+
+                      {projectError ? <p className="text-xs text-destructive">{projectError}</p> : null}
+
+                      <div className="mt-3 flex justify-end gap-2 pt-3">
+                        <Button type="button" variant="outline" size="sm" onClick={() => { setProjectMode("list"); resetProjectForm(); }}>
+                          Cancel
+                        </Button>
+                        <Button type="submit" size="sm">
+                          {projectMode === "create" ? "Save Project" : "Update Project"}
+                        </Button>
+                      </div>
+                    </form>
+                  </div>
+                </div>
+              ) : null}
+
+              {projectMode === "detail" && selectedProject ? (
+                <div className="space-y-4">
+                  <Card className="shadow-none">
+                    <CardHeader className="flex flex-row items-center justify-between">
+                      <CardTitle>{selectedProject.name} ({selectedProject.code})</CardTitle>
+                      <div className="flex gap-2">
+                        <Badge className={cn("hover:opacity-100", projectStatusBadgeClass(deriveProjectStatus(selectedProject)))}>
+                          {deriveProjectStatus(selectedProject)}
+                        </Badge>
+                      </div>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="grid gap-3 sm:grid-cols-3">
+                        <div className="rounded-md border p-3">
+                          <p className="text-[11px] text-muted-foreground">Timeline</p>
+                          <p className="text-sm font-medium">{selectedProject.startDate} → {selectedProject.endDate}</p>
+                        </div>
+                        <div className="rounded-md border p-3">
+                          <p className="text-[11px] text-muted-foreground">Budget</p>
+                          <p className="text-sm font-medium">{selectedProject.budgetAmount} {selectedProject.currency}</p>
+                        </div>
+                        <div className="rounded-md border p-3">
+                          <p className="text-[11px] text-muted-foreground">Funding Type</p>
+                          <p className="text-sm font-medium">{selectedProject.fundingType}</p>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  <Card className="shadow-none">
+                    <CardHeader>
+                      <CardTitle>Project Characteristics</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="grid gap-3 sm:grid-cols-3">
+                        <div className="rounded-md border p-3"><p className="text-[11px] text-muted-foreground">Funding Type</p><p className="text-sm font-medium">{selectedProject.fundingType}</p></div>
+                        <div className="rounded-md border p-3"><p className="text-[11px] text-muted-foreground">Audit Requirement</p><p className="text-sm font-medium">{selectedProject.requiresStrictDocumentation ? "Yes" : "No"}</p></div>
+                        <div className="rounded-md border p-3"><p className="text-[11px] text-muted-foreground">Approval Requirement</p><p className="text-sm font-medium">{selectedProject.requiresApprovalControl ? "Yes" : "No"}</p></div>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  <Card className="shadow-none">
+                    <CardHeader className="flex flex-row items-center justify-between">
+                      <CardTitle>Items & Services</CardTitle>
+                      <Button size="sm" onClick={openAddItem}>
+                        <Plus className="mr-1 h-3.5 w-3.5" />
+                        Add Item / Service
+                      </Button>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="overflow-hidden rounded-md border">
+                        <table className="w-full text-left text-xs">
+                          <thead className="bg-muted/50">
+                            <tr>
+                              <th className="px-3 py-2 font-medium">Item / Service Name</th>
+                              <th className="px-3 py-2 font-medium">Category</th>
+                              <th className="px-3 py-2 font-medium">Type</th>
+                              <th className="px-3 py-2 font-medium">Estimated Cost</th>
+                              <th className="px-3 py-2 font-medium">Notes</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {selectedProjectItems.length === 0 ? (
+                              <tr>
+                                <td className="px-3 py-4 text-muted-foreground" colSpan={5}>
+                                  No items/services added.
+                                </td>
+                              </tr>
+                            ) : (
+                              selectedProjectItems.map((row) => (
+                                <tr key={row.id} className="border-t border-border/60">
+                                  <td className="px-3 py-2">{row.name}</td>
+                                  <td className="px-3 py-2">{row.category}</td>
+                                  <td className="px-3 py-2">{row.type}</td>
+                                  <td className="px-3 py-2">{row.estimatedCost}</td>
+                                  <td className="px-3 py-2">{row.notes || "-"}</td>
+                                </tr>
+                              ))
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  <Card className="shadow-none">
+                    <CardHeader>
+                      <CardTitle>Related Purchases</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="rounded-md border p-3 text-xs text-muted-foreground">
+                        Linked PRs will appear here when project-based requisitions are connected.
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
+          {activeView === "standard" ? (
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-3">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon-sm"
+                    onClick={() => {
+                      setActiveView("landing");
+                      setStandardMode("list");
+                    }}
+                    aria-label="Back to purchase type selection"
+                  >
+                    <ArrowLeft />
+                  </Button>
+                  <p className="text-sm font-semibold">Standard Purchases</p>
+                </div>
+                <Button type="button" size="sm" onClick={openCreateStandard}>
+                  <Plus className="mr-1 h-3.5 w-3.5" />
+                  Create Standard Category
+                </Button>
+              </div>
+
+              {standardMode === "list" ? (
+                <div className="grid justify-items-start gap-3 md:grid-cols-2 xl:grid-cols-3">
+                  {standardCategories.length === 0 ? (
+                    <Card className="w-full max-w-none border-0 ring-0 bg-transparent shadow-none md:col-span-2 xl:col-span-3">
+                      <CardContent className="py-8 text-center text-xs text-muted-foreground">
+                        No standard categories created yet.
+                      </CardContent>
+                    </Card>
+                  ) : (
+                    standardCategories.map((category) => {
+                      const status: StandardStatus = category.isActive ? "Active" : "Inactive";
+                      const itemCount = standardItemsById[category.id]?.length ?? 0;
+                      return (
+                        <button
+                          key={category.id}
+                          type="button"
+                          onClick={() => openStandardDetail(category.id)}
+                          className="w-full max-w-[340px] rounded-lg border bg-card p-4 text-left transition-colors hover:bg-muted/30"
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2">
+                                <p className="truncate text-sm font-semibold">{category.name}</p>
+                                <Badge className={cn("hover:opacity-100", standardStatusBadgeClass(status))}>{status}</Badge>
+                              </div>
+                              <p className="text-xs text-muted-foreground">{category.department}</p>
+                            </div>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  type="button"
+                                  size="icon-sm"
+                                  variant="ghost"
+                                  onClick={(e) => e.stopPropagation()}
+                                  aria-label="View actions"
+                                >
+                                  <MoreVertical />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    openStandardDetail(category.id);
+                                  }}
+                                >
+                                  View
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    openEditStandard(category);
+                                  }}
+                                >
+                                  Edit
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </div>
+                          <div className="mt-3 grid gap-2 text-xs">
+                            <div>
+                              <p className="text-muted-foreground">Budget Type</p>
+                              <p className="font-medium">{category.budgetType}</p>
+                            </div>
+                            <div>
+                              <p className="text-muted-foreground">Items / Services</p>
+                              <p className="font-medium">{itemCount}</p>
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+              ) : null}
+
+              {standardMode === "detail" && selectedStandard ? (
+                <div className="space-y-4">
+                  <Card className="shadow-none">
+                    <CardHeader className="flex flex-row items-center justify-between">
+                      <CardTitle>{selectedStandard.name}</CardTitle>
+                      <Badge className={cn("hover:opacity-100", standardStatusBadgeClass(selectedStandard.isActive ? "Active" : "Inactive"))}>
+                        {selectedStandard.isActive ? "Active" : "Inactive"}
+                      </Badge>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="grid gap-3 sm:grid-cols-3">
+                        <div className="rounded-md border p-3"><p className="text-[11px] text-muted-foreground">Department</p><p className="text-sm font-medium">{selectedStandard.department}</p></div>
+                        <div className="rounded-md border p-3"><p className="text-[11px] text-muted-foreground">Budget Type</p><p className="text-sm font-medium">{selectedStandard.budgetType}</p></div>
+                        <div className="rounded-md border p-3"><p className="text-[11px] text-muted-foreground">Status</p><p className="text-sm font-medium">{selectedStandard.isActive ? "Active" : "Inactive"}</p></div>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  <Card className="shadow-none">
+                    <CardHeader><CardTitle>Category Attributes</CardTitle></CardHeader>
+                    <CardContent>
+                      <div className="grid gap-3 sm:grid-cols-3">
+                        <div className="rounded-md border p-3"><p className="text-[11px] text-muted-foreground">Recurring</p><p className="text-sm font-medium">{selectedStandard.recurringPurchase ? "Yes" : "No"}</p></div>
+                        <div className="rounded-md border p-3"><p className="text-[11px] text-muted-foreground">Contract-Based</p><p className="text-sm font-medium">{selectedStandard.contractBased ? "Yes" : "No"}</p></div>
+                        <div className="rounded-md border p-3"><p className="text-[11px] text-muted-foreground">Budget Limit</p><p className="text-sm font-medium">{selectedStandard.budgetLimit ? selectedStandard.budgetLimit : "Not defined"}</p></div>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  <Card className="shadow-none">
+                    <CardHeader className="flex flex-row items-center justify-between">
+                      <CardTitle>Items & Services</CardTitle>
+                      <Button size="sm" onClick={openAddStandardItem}>
+                        <Plus className="mr-1 h-3.5 w-3.5" />
+                        Add Item / Service
+                      </Button>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="overflow-hidden rounded-md border">
+                        <table className="w-full text-left text-xs">
+                          <thead className="bg-muted/50">
+                            <tr>
+                              <th className="px-3 py-2 font-medium">Item / Service Name</th>
+                              <th className="px-3 py-2 font-medium">Category</th>
+                              <th className="px-3 py-2 font-medium">Type</th>
+                              <th className="px-3 py-2 font-medium">Estimated Cost</th>
+                              <th className="px-3 py-2 font-medium">Frequency</th>
+                              <th className="px-3 py-2 font-medium">Notes</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {selectedStandardItems.length === 0 ? (
+                              <tr><td className="px-3 py-4 text-muted-foreground" colSpan={6}>No items/services added.</td></tr>
+                            ) : (
+                              selectedStandardItems.map((row) => (
+                                <tr key={row.id} className="border-t border-border/60">
+                                  <td className="px-3 py-2">{row.name}</td>
+                                  <td className="px-3 py-2">{row.category}</td>
+                                  <td className="px-3 py-2">{row.type}</td>
+                                  <td className="px-3 py-2">{row.estimatedCost}</td>
+                                  <td className="px-3 py-2">{row.frequency}</td>
+                                  <td className="px-3 py-2">{row.notes || "-"}</td>
+                                </tr>
+                              ))
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
+          {activeView === "emergency" ? (
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-3">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon-sm"
+                    onClick={() => {
+                      setActiveView("landing");
+                      setEmergencyMode("list");
+                    }}
+                    aria-label="Back to purchase type selection"
+                  >
+                    <ArrowLeft />
+                  </Button>
+                  <p className="text-sm font-semibold">Emergency Cases</p>
+                </div>
+                <Button type="button" size="sm" onClick={openCreateEmergency}>
+                  <Plus className="mr-1 h-3.5 w-3.5" />
+                  Create Emergency Case
+                </Button>
+              </div>
+
+              {emergencyMode === "list" ? (
+                <div className="grid justify-items-start gap-3 md:grid-cols-2 xl:grid-cols-3">
+                  {emergencyCases.length === 0 ? (
+                    <Card className="w-full max-w-none border-0 ring-0 bg-transparent shadow-none md:col-span-2 xl:col-span-3">
+                      <CardContent className="py-8 text-center text-xs text-muted-foreground">
+                        No emergency cases created yet.
+                      </CardContent>
+                    </Card>
+                  ) : (
+                    emergencyCases.map((row) => (
+                      <button
+                        key={row.id}
+                        type="button"
+                        onClick={() => openEmergencyDetail(row.id)}
+                        className="w-full max-w-[340px] rounded-lg border bg-card p-4 text-left transition-colors hover:bg-muted/30"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <p className="truncate text-sm font-semibold">{row.title}</p>
+                              <Badge className={cn("hover:opacity-100", emergencyPriorityBadgeClass(row.priority))}>{row.priority}</Badge>
+                            </div>
+                            <p className="text-xs text-muted-foreground">{row.code}</p>
+                          </div>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button type="button" size="icon-sm" variant="ghost" onClick={(e) => e.stopPropagation()} aria-label="View actions">
+                                <MoreVertical />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem onClick={(e) => { e.stopPropagation(); openEmergencyDetail(row.id); }}>View</DropdownMenuItem>
+                              <DropdownMenuItem onClick={(e) => { e.stopPropagation(); openEditEmergency(row); }}>Edit</DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
+                        <div className="mt-3 grid gap-2 text-xs">
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-muted-foreground">Reported</p>
+                            <p className="font-medium">{row.reportedDate}</p>
+                          </div>
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-muted-foreground">Status</p>
+                            <Badge className={cn("hover:opacity-100", emergencyStatusBadgeClass(row.status))}>{row.status}</Badge>
+                          </div>
+                          <p className="truncate text-muted-foreground">{row.description}</p>
+                        </div>
+                      </button>
+                    ))
+                  )}
+                </div>
+              ) : null}
+
+              {emergencyMode === "detail" && selectedEmergency ? (
+                <div className="space-y-4">
+                  <Card className="shadow-none">
+                    <CardHeader className="flex flex-row items-center justify-between">
+                      <CardTitle>{selectedEmergency.title} ({selectedEmergency.code})</CardTitle>
+                      <div className="flex items-center gap-2">
+                        <Badge className={cn("hover:opacity-100", emergencyPriorityBadgeClass(selectedEmergency.priority))}>{selectedEmergency.priority}</Badge>
+                        <Badge className={cn("hover:opacity-100", emergencyStatusBadgeClass(selectedEmergency.status))}>{selectedEmergency.status}</Badge>
+                      </div>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="grid gap-3 sm:grid-cols-3">
+                        <div className="rounded-md border p-3"><p className="text-[11px] text-muted-foreground">Reported Date</p><p className="text-sm font-medium">{selectedEmergency.reportedDate}</p></div>
+                        <div className="rounded-md border p-3"><p className="text-[11px] text-muted-foreground">Priority Level</p><p className="text-sm font-medium">{selectedEmergency.priority}</p></div>
+                        <div className="rounded-md border p-3"><p className="text-[11px] text-muted-foreground">Status</p><p className="text-sm font-medium">{selectedEmergency.status}</p></div>
+                      </div>
+                      <div className="mt-3 rounded-md border p-3">
+                        <p className="text-[11px] text-muted-foreground">Short Description</p>
+                        <p className="text-sm font-medium">{selectedEmergency.description}</p>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  <Card className="shadow-none">
+                    <CardHeader><CardTitle>Case Attributes</CardTitle></CardHeader>
+                    <CardContent>
+                      <div className="grid gap-3 sm:grid-cols-3">
+                        <div className="rounded-md border p-3"><p className="text-[11px] text-muted-foreground">Emergency Type</p><p className="text-sm font-medium">{selectedEmergency.emergencyType}</p></div>
+                        <div className="rounded-md border p-3"><p className="text-[11px] text-muted-foreground">Immediate Action Required</p><p className="text-sm font-medium">{selectedEmergency.requiresImmediateAction ? "Yes" : "No"}</p></div>
+                        <div className="rounded-md border p-3"><p className="text-[11px] text-muted-foreground">Post-Review Required</p><p className="text-sm font-medium">{selectedEmergency.requiresPostReview ? "Yes" : "No"}</p></div>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  <Card className="shadow-none">
+                    <CardHeader className="flex flex-row items-center justify-between">
+                      <CardTitle>Items & Services</CardTitle>
+                      <Button size="sm" onClick={openAddEmergencyItem}>
+                        <Plus className="mr-1 h-3.5 w-3.5" />
+                        Add Item / Service
+                      </Button>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="overflow-hidden rounded-md border">
+                        <table className="w-full text-left text-xs">
+                          <thead className="bg-muted/50">
+                            <tr>
+                              <th className="px-3 py-2 font-medium">Item / Service Name</th>
+                              <th className="px-3 py-2 font-medium">Category</th>
+                              <th className="px-3 py-2 font-medium">Type</th>
+                              <th className="px-3 py-2 font-medium">Estimated Cost</th>
+                              <th className="px-3 py-2 font-medium">Urgency Level</th>
+                              <th className="px-3 py-2 font-medium">Notes</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {selectedEmergencyItems.length === 0 ? (
+                              <tr><td className="px-3 py-4 text-muted-foreground" colSpan={6}>No items/services added.</td></tr>
+                            ) : (
+                              selectedEmergencyItems.map((item) => (
+                                <tr key={item.id} className="border-t border-border/60">
+                                  <td className="px-3 py-2">{item.name}</td>
+                                  <td className="px-3 py-2">{item.category}</td>
+                                  <td className="px-3 py-2">{item.type}</td>
+                                  <td className="px-3 py-2">{item.estimatedCost}</td>
+                                  <td className="px-3 py-2">{item.urgencyLevel}</td>
+                                  <td className="px-3 py-2">{item.notes || "-"}</td>
+                                </tr>
+                              ))
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  <Card className="shadow-none">
+                    <CardHeader><CardTitle>Justification & Review</CardTitle></CardHeader>
+                    <CardContent>
+                      <div className="grid gap-3">
+                        <div className="rounded-md border p-3"><p className="text-[11px] text-muted-foreground">Justification</p><p className="text-sm font-medium">{selectedEmergency.justification}</p></div>
+                        <div className="rounded-md border p-3"><p className="text-[11px] text-muted-foreground">Impact</p><p className="text-sm font-medium">{selectedEmergency.impact || "-"}</p></div>
+                        <div className="rounded-md border p-3"><p className="text-[11px] text-muted-foreground">Post-Action Notes</p><p className="text-sm font-medium">{selectedEmergency.postActionNotes || "-"}</p></div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+      </div>
+
+      {itemModalOpen && selectedProject ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
+          <div className="w-full max-w-lg rounded-lg border bg-card p-5 shadow-lg">
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="text-sm font-semibold">Add Item / Service · {selectedProject.code}</h3>
+              <Button type="button" variant="ghost" size="icon-sm" onClick={() => setItemModalOpen(false)} aria-label="Close item form">
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+            <div className="grid gap-3 text-xs sm:grid-cols-2">
+              <div className="space-y-1 sm:col-span-2">
+                <label className="text-xs font-medium">Item / Service Name</label>
+                <Input className="h-9" value={itemForm.name} onChange={(e) => setItemForm((prev) => ({ ...prev, name: e.target.value }))} />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium">Category</label>
+                <Input className="h-9" value={itemForm.category} onChange={(e) => setItemForm((prev) => ({ ...prev, category: e.target.value }))} />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium">Type</label>
+                <select className="h-9 w-full rounded-md border border-input bg-background px-3 text-xs" value={itemForm.type} onChange={(e) => setItemForm((prev) => ({ ...prev, type: e.target.value as ProjectItemType }))}>
+                  <option value="Goods">Goods</option>
+                  <option value="Service">Service</option>
+                </select>
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium">Estimated Cost</label>
+                <Input className="h-9" value={itemForm.estimatedCost} onChange={(e) => setItemForm((prev) => ({ ...prev, estimatedCost: e.target.value }))} />
+              </div>
+              <div className="space-y-1 sm:col-span-2">
+                <label className="text-xs font-medium">Notes</label>
+                <textarea
+                  className="min-h-[64px] w-full rounded-md border border-input bg-background px-3 py-2 text-xs outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+                  value={itemForm.notes}
+                  onChange={(e) => setItemForm((prev) => ({ ...prev, notes: e.target.value }))}
+                />
+              </div>
+            </div>
+            {itemError ? <p className="mt-2 text-xs text-destructive">{itemError}</p> : null}
+            <div className="mt-4 flex justify-end gap-2 border-t pt-3">
+              <Button type="button" variant="outline" size="sm" onClick={() => setItemModalOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="button" size="sm" onClick={submitProjectItem}>
+                Save
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {(standardMode === "create" || standardMode === "edit") ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
+          <div className="flex max-h-[min(88vh,680px)] w-full max-w-3xl flex-col rounded-lg border bg-card p-6 shadow-lg">
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-sm font-semibold">{standardMode === "create" ? "Create Standard Category" : "Edit Standard Category"}</h3>
+              <Button type="button" variant="ghost" size="icon-sm" onClick={() => { setStandardMode("list"); resetStandardForm(); }} aria-label="Close standard category form">
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+            <form className="flex min-h-0 flex-1 flex-col" onSubmit={submitStandardCategory}>
+              <div className="no-scrollbar min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
+                <section className="space-y-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Basic Information</p>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium">Category Name</label>
+                      <Input className="h-9" value={standardForm.name} onChange={(e) => setStandardForm((prev) => ({ ...prev, name: e.target.value }))} />
+                    </div>
+                    <div className="space-y-1 sm:col-span-2">
+                      <label className="text-xs font-medium">Description</label>
+                      <textarea className="min-h-[72px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-xs outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30" value={standardForm.description} onChange={(e) => setStandardForm((prev) => ({ ...prev, description: e.target.value }))} />
+                    </div>
+                  </div>
+                </section>
+
+                <section className="space-y-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Ownership</p>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium">Department / Team</label>
+                    <Input className="h-9" value={standardForm.department} onChange={(e) => setStandardForm((prev) => ({ ...prev, department: e.target.value }))} />
+                  </div>
+                </section>
+
+                <section className="space-y-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Budget</p>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium">Budget Type</label>
+                      <select className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-xs" value={standardForm.budgetType} onChange={(e) => setStandardForm((prev) => ({ ...prev, budgetType: e.target.value as StandardBudgetType }))}>
+                        <option value="Operational">Operational</option>
+                        <option value="Departmental">Departmental</option>
+                      </select>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium">Optional Budget Limit</label>
+                      <Input className="h-9" value={standardForm.budgetLimit} onChange={(e) => setStandardForm((prev) => ({ ...prev, budgetLimit: e.target.value }))} />
+                    </div>
+                  </div>
+                </section>
+
+                <section className="space-y-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Behavior</p>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <label className="flex items-center justify-between rounded-md border px-3 py-2">
+                      <span className="text-xs">Recurring Purchase</span>
+                      <input type="checkbox" checked={standardForm.recurringPurchase} onChange={(e) => setStandardForm((prev) => ({ ...prev, recurringPurchase: e.target.checked }))} />
+                    </label>
+                    <label className="flex items-center justify-between rounded-md border px-3 py-2">
+                      <span className="text-xs">Contract-Based</span>
+                      <input type="checkbox" checked={standardForm.contractBased} onChange={(e) => setStandardForm((prev) => ({ ...prev, contractBased: e.target.checked }))} />
+                    </label>
+                  </div>
+                </section>
+              </div>
+
+              {standardError ? <p className="text-xs text-destructive">{standardError}</p> : null}
+              <div className="mt-3 flex justify-end gap-2 pt-3">
+                <Button type="button" variant="outline" size="sm" onClick={() => { setStandardMode("list"); resetStandardForm(); }}>
+                  Cancel
+                </Button>
+                <Button type="submit" size="sm">{standardMode === "create" ? "Save Category" : "Update Category"}</Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
+
+      {standardItemModalOpen && selectedStandard ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
+          <div className="w-full max-w-lg rounded-lg border bg-card p-5 shadow-lg">
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="text-sm font-semibold">Add Item / Service · {selectedStandard.name}</h3>
+              <Button type="button" variant="ghost" size="icon-sm" onClick={() => setStandardItemModalOpen(false)} aria-label="Close standard item form">
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+            <div className="grid gap-3 text-xs sm:grid-cols-2">
+              <div className="space-y-1 sm:col-span-2">
+                <label className="text-xs font-medium">Item / Service Name</label>
+                <Input className="h-9" value={standardItemForm.name} onChange={(e) => setStandardItemForm((prev) => ({ ...prev, name: e.target.value }))} />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium">Category</label>
+                <select className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-xs" value={standardItemForm.category} onChange={(e) => setStandardItemForm((prev) => ({ ...prev, category: e.target.value as StandardItemRow["category"] }))}>
+                  <option value="IT">IT</option>
+                  <option value="Office">Office</option>
+                  <option value="Facility">Facility</option>
+                  <option value="Service">Service</option>
+                </select>
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium">Type</label>
+                <select className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-xs" value={standardItemForm.type} onChange={(e) => setStandardItemForm((prev) => ({ ...prev, type: e.target.value as StandardItemType }))}>
+                  <option value="Goods">Goods</option>
+                  <option value="Service">Service</option>
+                </select>
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium">Estimated Cost</label>
+                <Input className="h-9" value={standardItemForm.estimatedCost} onChange={(e) => setStandardItemForm((prev) => ({ ...prev, estimatedCost: e.target.value }))} />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium">Frequency</label>
+                <select className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-xs" value={standardItemForm.frequency} onChange={(e) => setStandardItemForm((prev) => ({ ...prev, frequency: e.target.value as StandardFrequency }))}>
+                  <option value="One-time">One-time</option>
+                  <option value="Monthly">Monthly</option>
+                  <option value="Annual">Annual</option>
+                </select>
+              </div>
+              <div className="space-y-1 sm:col-span-2">
+                <label className="text-xs font-medium">Notes</label>
+                <textarea className="min-h-[64px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-xs outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30" value={standardItemForm.notes} onChange={(e) => setStandardItemForm((prev) => ({ ...prev, notes: e.target.value }))} />
+              </div>
+            </div>
+            {standardItemError ? <p className="mt-2 text-xs text-destructive">{standardItemError}</p> : null}
+            <div className="mt-4 flex justify-end gap-2 pt-3">
+              <Button type="button" variant="outline" size="sm" onClick={() => setStandardItemModalOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="button" size="sm" onClick={submitStandardItem}>
+                Save
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {(emergencyMode === "create" || emergencyMode === "edit") ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
+          <div className="flex max-h-[min(88vh,700px)] w-full max-w-3xl flex-col rounded-lg border bg-card p-6 shadow-lg">
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-sm font-semibold">{emergencyMode === "create" ? "Create Emergency Case" : "Edit Emergency Case"}</h3>
+              <Button type="button" variant="ghost" size="icon-sm" onClick={() => { setEmergencyMode("list"); resetEmergencyForm(); }} aria-label="Close emergency case form">
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+            <form className="flex min-h-0 flex-1 flex-col" onSubmit={submitEmergencyCase}>
+              <div className="no-scrollbar min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
+                <section className="space-y-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Basic Information</p>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium">Case Title</label>
+                      <Input className="h-9" value={emergencyForm.title} onChange={(e) => setEmergencyForm((prev) => ({ ...prev, title: e.target.value }))} />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium">Case Code</label>
+                      <Input className="h-9" value={emergencyForm.code} onChange={(e) => setEmergencyForm((prev) => ({ ...prev, code: e.target.value }))} />
+                    </div>
+                    <div className="space-y-1 sm:col-span-2">
+                      <label className="text-xs font-medium">Description</label>
+                      <textarea className="min-h-[72px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-xs outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30" value={emergencyForm.description} onChange={(e) => setEmergencyForm((prev) => ({ ...prev, description: e.target.value }))} />
+                    </div>
+                  </div>
+                </section>
+
+                <section className="space-y-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Classification</p>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium">Emergency Type</label>
+                      <select className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-xs" value={emergencyForm.emergencyType} onChange={(e) => setEmergencyForm((prev) => ({ ...prev, emergencyType: e.target.value as EmergencyType }))}>
+                        <option value="Equipment">Equipment</option>
+                        <option value="Facility">Facility</option>
+                        <option value="IT">IT</option>
+                        <option value="Safety">Safety</option>
+                        <option value="Other">Other</option>
+                      </select>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium">Priority Level</label>
+                      <select className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-xs" value={emergencyForm.priority} onChange={(e) => setEmergencyForm((prev) => ({ ...prev, priority: e.target.value as EmergencyPriority }))}>
+                        <option value="High">High</option>
+                        <option value="Critical">Critical</option>
+                      </select>
+                    </div>
+                  </div>
+                </section>
+
+                <section className="space-y-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Timeline</p>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium">Reported Date</label>
+                      <Input className="h-9" type="date" value={emergencyForm.reportedDate} onChange={(e) => setEmergencyForm((prev) => ({ ...prev, reportedDate: e.target.value }))} />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium">Required Action Date (optional)</label>
+                      <Input className="h-9" type="date" value={emergencyForm.requiredActionDate} onChange={(e) => setEmergencyForm((prev) => ({ ...prev, requiredActionDate: e.target.value }))} />
+                    </div>
+                  </div>
+                </section>
+
+                <section className="space-y-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Control</p>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <label className="flex items-center justify-between rounded-md border px-3 py-2">
+                      <span className="text-xs">Requires Immediate Action</span>
+                      <input type="checkbox" checked={emergencyForm.requiresImmediateAction} onChange={(e) => setEmergencyForm((prev) => ({ ...prev, requiresImmediateAction: e.target.checked }))} />
+                    </label>
+                    <label className="flex items-center justify-between rounded-md border px-3 py-2">
+                      <span className="text-xs">Requires Post-Review</span>
+                      <input type="checkbox" checked={emergencyForm.requiresPostReview} onChange={(e) => setEmergencyForm((prev) => ({ ...prev, requiresPostReview: e.target.checked }))} />
+                    </label>
+                  </div>
+                </section>
+
+                <section className="space-y-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Justification & Review</p>
+                  <div className="grid gap-3">
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium">Justification</label>
+                      <textarea className="min-h-[64px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-xs outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30" value={emergencyForm.justification} onChange={(e) => setEmergencyForm((prev) => ({ ...prev, justification: e.target.value }))} />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium">Impact (optional)</label>
+                      <Input className="h-9" value={emergencyForm.impact} onChange={(e) => setEmergencyForm((prev) => ({ ...prev, impact: e.target.value }))} />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium">Post-Action Notes</label>
+                      <textarea className="min-h-[64px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-xs outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30" value={emergencyForm.postActionNotes} onChange={(e) => setEmergencyForm((prev) => ({ ...prev, postActionNotes: e.target.value }))} />
+                    </div>
+                  </div>
+                </section>
+              </div>
+
+              {emergencyError ? <p className="text-xs text-destructive">{emergencyError}</p> : null}
+              <div className="mt-3 flex justify-end gap-2 pt-3">
+                <Button type="button" variant="outline" size="sm" onClick={() => { setEmergencyMode("list"); resetEmergencyForm(); }}>
+                  Cancel
+                </Button>
+                <Button type="submit" size="sm">{emergencyMode === "create" ? "Save Case" : "Update Case"}</Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
+
+      {emergencyItemModalOpen && selectedEmergency ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
+          <div className="w-full max-w-lg rounded-lg border bg-card p-5 shadow-lg">
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="text-sm font-semibold">Add Item / Service · {selectedEmergency.code}</h3>
+              <Button type="button" variant="ghost" size="icon-sm" onClick={() => setEmergencyItemModalOpen(false)} aria-label="Close emergency item form">
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+            <div className="grid gap-3 text-xs sm:grid-cols-2">
+              <div className="space-y-1 sm:col-span-2">
+                <label className="text-xs font-medium">Item / Service Name</label>
+                <Input className="h-9" value={emergencyItemForm.name} onChange={(e) => setEmergencyItemForm((prev) => ({ ...prev, name: e.target.value }))} />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium">Category</label>
+                <select className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-xs" value={emergencyItemForm.category} onChange={(e) => setEmergencyItemForm((prev) => ({ ...prev, category: e.target.value as EmergencyItemCategory }))}>
+                  <option value="Repair">Repair</option>
+                  <option value="Equipment">Equipment</option>
+                  <option value="Service">Service</option>
+                  <option value="Logistics">Logistics</option>
+                </select>
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium">Type</label>
+                <select className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-xs" value={emergencyItemForm.type} onChange={(e) => setEmergencyItemForm((prev) => ({ ...prev, type: e.target.value as EmergencyItemType }))}>
+                  <option value="Goods">Goods</option>
+                  <option value="Service">Service</option>
+                </select>
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium">Estimated Cost</label>
+                <Input className="h-9" value={emergencyItemForm.estimatedCost} onChange={(e) => setEmergencyItemForm((prev) => ({ ...prev, estimatedCost: e.target.value }))} />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium">Urgency Level</label>
+                <select className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-xs" value={emergencyItemForm.urgencyLevel} onChange={(e) => setEmergencyItemForm((prev) => ({ ...prev, urgencyLevel: e.target.value as EmergencyPriority }))}>
+                  <option value="High">High</option>
+                  <option value="Critical">Critical</option>
+                </select>
+              </div>
+              <div className="space-y-1 sm:col-span-2">
+                <label className="text-xs font-medium">Notes</label>
+                <textarea className="min-h-[64px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-xs outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30" value={emergencyItemForm.notes} onChange={(e) => setEmergencyItemForm((prev) => ({ ...prev, notes: e.target.value }))} />
+              </div>
+            </div>
+            {emergencyItemError ? <p className="mt-2 text-xs text-destructive">{emergencyItemError}</p> : null}
+            <div className="mt-4 flex justify-end gap-2 pt-3">
+              <Button type="button" variant="outline" size="sm" onClick={() => setEmergencyItemModalOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="button" size="sm" onClick={submitEmergencyItem}>
+                Save
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export default function Home() {
   const [activeModule, setActiveModule] = useState<MainModule>("Dashboard");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -9954,7 +11516,7 @@ export default function Home() {
               createdMasterDataRows={createdMasterDataRows}
             />
           )}
-          {activeModule === "Project" && <ProjectModule />}
+          {activeModule === "Purchase Types" && <PurchaseTypesModule />}
           {activeModule === "Sourcing" && <SourcingModule />}
           {activeModule === "Inventory" && <InventoryModule />}
           {activeModule === "Budget" && <BudgetModule />}
